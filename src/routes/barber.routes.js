@@ -1,0 +1,57 @@
+const express = require("express");
+const router = express.Router();
+const barberController = require("../controllers/barber.controller");
+const upload = require("../utils/upload");
+const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Barbers
+ *     description: Manajemen data kapster/barber
+ */
+
+/**
+ * @swagger
+ * /barbers:
+ *   get:
+ *     summary: Ambil semua daftar barber
+ *     tags: [Barbers]
+ *     responses:
+ *       200:
+ *         description: Berhasil mengambil list barber
+ *   post:
+ *     summary: Tambah kapster baru (Admin Only)
+ *     tags: [Barbers]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nama_kapster:
+ *                 type: string
+ *               spesialisasi:
+ *                 type: string
+ *               pengalaman:
+ *                 type: integer
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       201:
+ *         description: Barber berhasil ditambahkan
+ */
+router.get("/", barberController.getAllBarbers);
+
+router.post(
+  "/",
+  verifyToken,
+  isAdmin,
+  upload.single("image"),
+  barberController.createBarber,
+);
+
+module.exports = router;
