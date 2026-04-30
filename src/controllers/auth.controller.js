@@ -91,15 +91,6 @@ exports.guestLogin = async (req, res) => {
   }
 };
 
-exports.getProfile = async (req, res) => {
-  try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    res.status(200).json({ success: true, data: user });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
 exports.adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;

@@ -50,22 +50,6 @@ router.post("/guest-login", authController.guestLogin);
 
 /**
  * @swagger
- * /auth/profile:
- *   get:
- *     summary: Ambil profil user yang sedang login
- *     tags: [Auth]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Berhasil mengambil profil
- *       401:
- *         description: Tidak terautentikasi
- */
-router.get("/profile", verifyToken, authController.getProfile);
-
-/**
- * @swagger
  * /auth/admin/login:
  *   post:
  *     summary: Login khusus admin

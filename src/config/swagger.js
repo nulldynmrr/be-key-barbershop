@@ -30,11 +30,11 @@ const options = {
 
 function buildSwaggerSpec() {
   try {
-    return swaggerJsdoc(options);
+    const spec = swaggerJsdoc(options);
+    console.log("Swagger loaded:", Object.keys(spec.paths));
+    return spec;
   } catch (err) {
-    // Jangan bikin backend crash hanya karena anotasi Swagger error.
-    // Spec minimal supaya server tetap bisa jalan.
-    console.error("[swagger] failed to generate spec:", err?.message || err);
+    console.error("[swagger] failed:", err.message);
     return {
       ...options.definition,
       paths: {},

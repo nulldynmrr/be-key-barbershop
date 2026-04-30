@@ -1,8 +1,7 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-// Ambil profil diri sendiri
-exports.getProfile = async (req, res) => {
+const getProfile = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
@@ -20,108 +19,95 @@ exports.getProfile = async (req, res) => {
     });
 
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User tidak ditemukan" });
+      const error = new Error("User tidak ditemukan");
+      error.statusCode = 404;
+      throw error;
     }
 
     res.status(200).json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };
 
-// Update profil diri sendiri (misal ganti nama)
-exports.updateProfile = async (req, res) => {
-  const { nama } = req.body;
+const updateProfile = async (req, res, next) => {
   try {
+    const { nama } = req.body;
+
+    if (!nama) {
+      const error = new Error("Nama wajib diisi");
+      error.statusCode = 400;
+      throw error;
+    }
+
     const user = await prisma.user.update({
       where: { id: req.user.id },
       data: { nama },
       select: { id: true, nama: true, email: true },
     });
 
-    res
-      .status(200)
-      .json({ success: true, message: "Profil berhasil diupdate", data: user });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Ambil riwayat AI Generation milik sendiri
-exports.getAiHistory = async (req, res) => {
-  try {
-    const history = await prisma.aIGeneration.findMany({
-      where: { user_id: req.user.id },
-      orderBy: { tgl_generate: "desc" },
-    });
-
-    res
-      .status(200)
-      .json({ success: true, total_data: history.length, data: history });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Ambil riwayat Transaksi milik sendiri
-exports.getTransactions = async (req, res) => {
-  try {
-    const transactions = await prisma.transaction.findMany({
-      where: { user_id: req.user.id },
-      orderBy: { tgl_transaksi: "desc" },
-    });
+    if (req.log) req.log.info({ userId: req.user.id }, "User update profil");
 
     res.status(200).json({
       success: true,
-      total_data: transactions.length,
-      data: transactions,
+      message: "Profil berhasil diupdate",
+      data: user,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };
 
-// Kirim Feedback ke Admin
-exports.submitFeedback = async (req, res) => {
-  const { subject, message } = req.body;
-
-  if (!subject || !message) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Subject dan message wajib diisi" });
-  }
-
+const getAiHistory = async (req, res, next) => {
   try {
-    const feedback = await prisma.feedback.create({
-      data: {
-        user_id: req.user.id,
-        subject,
-        message,
-      },
-    });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    res.status(201).json({
+    const [total, history] = await Promise.all([
+      prisma.aIGeneration.count({ where: { user_id: req.user.id } }),
+      prisma.aIGeneration.findMany({
+        where: { user_id: req.user.id },
+        orderBy: { tgl_generate: "desc" },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    res.status(200).json({
       success: true,
-      message: "Feedback berhasil dikirim",
-      data: feedback,
+      data: history,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };
 
-// Lihat daftar Feedback yang pernah dikirim diri sendiri
-exports.getMyFeedbacks = async (req, res) => {
+const getTransactions = async (req, res, next) => {
   try {
-    const feedbacks = await prisma.feedback.findMany({
-      where: { user_id: req.user.id },
-      orderBy: { createdAt: "desc" },
-    });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    res.status(200).json({ success: true, data: feedbacks });
+    const [total, transactions] = await Promise.all([
+      prisma.transaction.count({ where: { user_id: req.user.id } }),
+      prisma.transaction.findMany({
+        where: { user_id: req.user.id },
+        orderBy: { tgl_transaksi: "desc" },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: transactions,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };
+
+module.exports = { getProfile, updateProfile, getAiHistory, getTransactions };

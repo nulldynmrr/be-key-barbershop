@@ -1,126 +1,124 @@
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-    provider = "mysql"
-    url      = env("DATABASE_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
-    user
-    admin
+  user
+  admin
 }
 
 enum TipeAkun {
-    free
-    premium
-    vip
+  free
+  premium
+  vip
 }
 
 model User {
-    id                     String          @id @default(uuid())
-    nama                   String
-    email                  String?         @unique
-    password               String? 
-    role                   Role            @default(user)
-    tipe_akun              TipeAkun        @default(free)
-    sisa_credit            Int             @default(3)
-    device_cookie          String?         @unique
-    status_langganan       Boolean         @default(false)
-    tgl_berakhir_langganan DateTime?
-    is_banned              Boolean         @default(false)
-    createdAt              DateTime        @default(now())
-    transactions           Transaction[]
-    ai_generations         AIGeneration[]
-    system_api_logs        SystemApiLog[]
-    feedbacks              Feedback[]
+  id                     String         @id @default(uuid())
+  nama                   String
+  email                  String?        @unique
+  password               String?
+  role                   Role           @default(user)
+  tipe_akun              TipeAkun       @default(free)
+  sisa_credit            Int            @default(3)
+  device_cookie          String?        @unique
+  status_langganan       Boolean        @default(false)
+  tgl_berakhir_langganan DateTime?
+  is_banned              Boolean        @default(false)
+  createdAt              DateTime       @default(now())
+  transactions           Transaction[]
+  ai_generations         AIGeneration[]
+  system_api_logs        SystemApiLog[]
+  feedbacks              Feedback[]
 }
 
 model Transaction {
-    id              String      @id @default(uuid())
-    user_id         String
-    jenis_transaksi String
-    nominal         Int
-    status          String
-    tgl_transaksi   DateTime    @default(now())
-    user            User        @relation(fields: [user_id], references: [id])
+  id              String   @id @default(uuid())
+  user_id         String
+  jenis_transaksi String
+  nominal         Int
+  status          String
+  tgl_transaksi   DateTime @default(now())
+  user            User     @relation(fields: [user_id], references: [id])
 }
 
 model AIGeneration {
-    id                    String      @id @default(uuid())
-    user_id               String      
-    url_foto_upload       String
-    url_hasil_img         Json?       
-    hasil_analisis        Json        
-    harga_credit_terpakai Int
-    tgl_generate          DateTime    @default(now())
-    user                  User        @relation(fields: [user_id], references: [id])
-    system_api_logs       SystemApiLog[]
+  id                    String         @id @default(uuid())
+  user_id               String
+  url_foto_upload       String
+  url_hasil_img         Json?
+  hasil_analisis        Json
+  harga_credit_terpakai Int
+  tgl_generate          DateTime       @default(now())
+  user                  User           @relation(fields: [user_id], references: [id])
+  system_api_logs       SystemApiLog[]
 }
 
 model SystemApiLog {
-    id                 String        @id @default(uuid())
-    model_name         String
-    input_tokens       Int
-    output_tokens      Int
-    total_tokens       Int
-    cost_usd           Decimal       @db.Decimal(10,6)
-    tgl_penggunaan     DateTime      @default(now())
+  id             String   @id @default(uuid())
+  model_name     String
+  input_tokens   Int
+  output_tokens  Int
+  total_tokens   Int
+  cost_usd       Decimal  @db.Decimal(10, 6)
+  tgl_penggunaan DateTime @default(now())
 
-    user_id            String?       
-    ai_generation_id   String?     
-    
-    user               User?         @relation(fields: [user_id], references: [id])
-    ai_generation      AIGeneration? @relation(fields: [ai_generation_id], references: [id])
+  user_id          String?
+  ai_generation_id String?
+
+  user          User?         @relation(fields: [user_id], references: [id])
+  ai_generation AIGeneration? @relation(fields: [ai_generation_id], references: [id])
 }
 
 model Service {
-    id              Int         @id @default(autoincrement())
-    nama_layanan    String
-    harga           Int
-    deskripsi       String?
-    durasi          Int?
-    image_url       String?
+  id           Int     @id @default(autoincrement())
+  nama_layanan String
+  harga        Int
+  deskripsi    String?
+  durasi       Int?
+  image_url    String?
 }
 
 model Barber {
-    id              Int         @id @default(autoincrement())
-    nama_kapster    String
-    url_foto_upload String?
-    pengalaman      Int?
-    spesialisasi    String?
+  id              Int     @id @default(autoincrement())
+  nama_kapster    String
+  url_foto_upload String?
+  pengalaman      Int?
+  spesialisasi    String?
 }
 
 model Gallery {
-    id               Int        @id @default(autoincrement())
-    url_foto_gallery String
-    kategori         String
+  id               Int    @id @default(autoincrement())
+  url_foto_gallery String
+  kategori         String
 }
 
 model AdminTokenPurchase {
-    id              String      @id @default(uuid())
-    nama_paket      String     
-    jumlah_token    Int?        
-    kos_total_idr   Int         
-    nominal_usd     Decimal     @default(0) @db.Decimal(10,2) 
-    tgl_pembelian   DateTime    @default(now())
+  id            String   @id @default(uuid())
+  nama_paket    String
+  jumlah_token  Int?
+  kos_total_idr Int
+  nominal_usd   Decimal  @default(0) @db.Decimal(10, 2)
+  tgl_pembelian DateTime @default(now())
 }
 
-model AiModelConfig {
-    id                  Int      @id @default(autoincrement())
-    router_name         String   
-    base_url            String?  
-    api_key             String
-    model_name          String   
-    tipe_ai             String   @unique 
-    is_active           Boolean  @default(true)
-    
-    tarif_input_per_1k  Decimal  @default(0) @db.Decimal(10,6)
-    tarif_output_per_1k Decimal  @default(0) @db.Decimal(10,6)
-    tarif_per_image     Decimal  @default(0) @db.Decimal(10,4)
-
-    updatedAt           DateTime @updatedAt
+model AiModel {
+  id              String @id @default(uuid())
+  namaRouter      String
+  baseUrl         String
+  modelName       String
+  apiKey          String // Harus dienkripsi di DB!
+  typeAi          String // 'LLM' | 'IMAGE_GEN'
+  hargaInput1M    Float
+  hargaOutput1M   Float
+  maxBudget       Float
+  rpmLimit        Int
+  avgTokensPerUse Int    @default(2000) // Estimasi token per 1x aksi
 }
 
 model Feedback {
@@ -133,12 +131,14 @@ model Feedback {
   createdAt DateTime @default(now())
 }
 
-model SystemSetting {
-  id                      Int      @id
-  maintenance_mode        Boolean  @default(false)
-  default_new_user_credit Int      @default(3)
-  global_price_multiplier Decimal  @default(1) @db.Decimal(10,2)
-  updatedAt               DateTime @updatedAt
+model SystemConfig {
+  id               Int      @id @default(1) // Singleton pattern
+  globalMultiplier Float    @default(1.35)
+  baseRateUsdIdr   Float
+  inflationBuffer  Float    @default(0.05)
+  adminFeeFixed    Float    @default(4500.0)
+  mdrPercentage    Float    @default(0.007) // 0.7% default QRIS
+  updatedAt        DateTime @updatedAt
 }
 
 enum PackageType {
@@ -147,16 +147,43 @@ enum PackageType {
 }
 
 model CreditPackage {
-  id                   Int          @id @default(autoincrement())
-  nama_paket           String
-  tipe_paket           PackageType  @default(ONETIME)
-  jumlah_koin          Int          @default(0)
-  durasi_hari          Int?         
-  harga_normal         Int
-  harga_diskon         Int?
-  diskon_mulai         DateTime?
-  diskon_akhir         DateTime?
-  is_active            Boolean      @default(true)
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  id           Int         @id @default(autoincrement())
+  nama_paket   String
+  tipe_paket   PackageType @default(ONETIME)
+  jumlah_koin  Int         @default(0)
+  durasi_hari  Int?
+  harga_normal Int
+  harga_diskon Int?
+  diskon_mulai DateTime?
+  diskon_akhir DateTime?
+  is_active    Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model SubscriptionPackage {
+  id         String @id @default(uuid())
+  namaPaket  String
+  jumlahKoin Int
+  deskripsi  String
+
+  // Toggles (JSON atau Boolean)
+  featStandardScan Boolean @default(true)
+  featSymmetry     Boolean @default(false)
+  featAdvMapping   Boolean @default(false)
+  featVirtualTryOn Boolean @default(false)
+  featHistory      Boolean @default(false)
+
+  typeValue    String // 'ONTIME' | 'SUBSCRIPTION'
+  durationDays Int?
+
+  hppIdeal     Float // Hasil kalkulasi backend
+  hargaNominal Float
+
+  promoAktif  Boolean   @default(false)
+  hargaDiskon Float?
+  diskonMulai DateTime?
+  diskonAkhir DateTime?
+
+  status String @default("AKTIF")
 }

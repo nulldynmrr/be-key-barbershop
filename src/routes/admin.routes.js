@@ -1,13 +1,20 @@
-const express = require("express");
-const router = express.Router();
-const adminController = require("../controllers/admin.controller");
+const { Router } = require("express");
+const {
+  getUsers,
+  getUserDetail,
+  adjustCredit,
+  updateUserStatus,
+  deleteUser,
+} = require("../controllers/admin.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
+
+const router = Router();
 
 /**
  * @swagger
  * tags:
  *   name: Admin Management
- *   description: Kontrol penuh User, System, dan Feedback
+ *   description: Kontrol penuh data User (Khusus Admin)
  */
 
 router.use(verifyToken, isAdmin);
@@ -16,40 +23,32 @@ router.use(verifyToken, isAdmin);
  * @swagger
  * /admin/users/all:
  *   get:
- *     summary: Ambil seluruh daftar user tanpa filter
- *     tags: [Admin Management]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Berhasil mengambil semua data user
- */
-router.get("/users/all", adminController.getAllUsers);
-
-/**
- * @swagger
- * /admin/users:
- *   get:
- *     summary: List semua user dengan filter search
+ *     summary: Ambil daftar semua user dengan pagination & search
  *     tags: [Admin Management]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10 }
+ *       - in: query
  *         name: search
- *         schema:
- *           type: string
+ *         schema: { type: string }
+ *         description: Cari berdasarkan nama atau email
  *     responses:
  *       200:
  *         description: Berhasil mengambil daftar user
  */
-router.get("/users", adminController.getUsers);
+router.get("/users", getUsers);
 
 /**
  * @swagger
  * /admin/users/{id}:
  *   get:
- *     summary: Detail user + riwayat
+ *     summary: Detail user beserta 10 riwayat transaksi/AI terakhir
  *     tags: [Admin Management]
  *     security:
  *       - bearerAuth: []
@@ -57,13 +56,12 @@ router.get("/users", adminController.getUsers);
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string, format: uuid }
  *     responses:
  *       200:
- *         description: Detail user
+ *         description: Berhasil mengambil detail user
  *   delete:
- *     summary: Hapus user
+ *     summary: Hapus user dari sistem
  *     tags: [Admin Management]
  *     security:
  *       - bearerAuth: []
@@ -71,20 +69,19 @@ router.get("/users", adminController.getUsers);
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string, format: uuid }
  *     responses:
  *       200:
- *         description: User dihapus
+ *         description: User berhasil dihapus
  */
-router.get("/users/:id", adminController.getUserDetail);
-router.delete("/users/:id", adminController.deleteUser);
+router.get("/users/:id", getUserDetail);
+router.delete("/users/:id", deleteUser);
 
 /**
  * @swagger
  * /admin/users/{id}/credit:
  *   patch:
- *     summary: Tambah/Kurangi credit
+ *     summary: Tambah/Kurangi credit user secara manual
  *     tags: [Admin Management]
  *     security:
  *       - bearerAuth: []
@@ -92,23 +89,24 @@ router.delete("/users/:id", adminController.deleteUser);
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string, format: uuid }
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [amount]
  *             properties:
  *               amount:
  *                 type: integer
  *                 example: 10
+ *                 description: Gunakan angka minus (-10) untuk mengurangi credit
  *     responses:
  *       200:
- *         description: Credit diupdate
+ *         description: Credit berhasil diupdate
  */
-router.patch("/users/:id/credit", adminController.adjustCredit);
+router.patch("/users/:id/credit", adjustCredit);
 
 /**
  * @swagger
@@ -122,95 +120,22 @@ router.patch("/users/:id/credit", adminController.adjustCredit);
  *       - in: path
  *         name: id
  *         required: true
- *         schema:
- *           type: string
+ *         schema: { type: string, format: uuid }
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [is_banned]
  *             properties:
  *               is_banned:
  *                 type: boolean
  *                 example: true
  *     responses:
  *       200:
- *         description: Status diupdate
+ *         description: Status ban user berhasil diupdate
  */
-router.patch("/users/:id/status", adminController.updateUserStatus);
-
-/**
- * @swagger
- * /admin/settings:
- *   get:
- *     summary: Ambil setting sistem
- *     tags: [Admin Management]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Berhasil
- *   put:
- *     summary: Update setting sistem
- *     tags: [Admin Management]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               maintenance_mode:
- *                 type: boolean
- *                 example: false
- *               default_new_user_credit:
- *                 type: integer
- *                 example: 5
- *               global_price_multiplier:
- *                 type: number
- *                 example: 1.0
- *     responses:
- *       200:
- *         description: Diupdate
- */
-router.get("/settings", adminController.getSettings);
-router.put("/settings", adminController.updateSettings);
-
-/**
- * @swagger
- * /admin/feedbacks:
- *   get:
- *     summary: Lihat semua feedback
- *     tags: [Admin Management]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Berhasil
- */
-router.get("/feedbacks", adminController.getFeedbacks);
-
-/**
- * @swagger
- * /admin/feedbacks/{id}/resolve:
- *   patch:
- *     summary: Selesaikan feedback
- *     tags: [Admin Management]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Selesai
- */
-router.patch("/feedbacks/:id/resolve", adminController.resolveFeedback);
+router.patch("/users/:id/status", updateUserStatus);
 
 module.exports = router;
