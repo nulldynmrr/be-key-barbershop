@@ -21,7 +21,7 @@ router.use(verifyToken, isAdmin);
 
 /**
  * @swagger
- * /admin/users/all:
+ * /v1/admin/users/all:
  *   get:
  *     summary: Ambil daftar semua user dengan pagination & search
  *     tags: [Admin Management]
@@ -46,7 +46,7 @@ router.get("/users", getUsers);
 
 /**
  * @swagger
- * /admin/users/{id}:
+ * /v1/admin/users/{id}:
  *   get:
  *     summary: Detail user beserta 10 riwayat transaksi/AI terakhir
  *     tags: [Admin Management]
@@ -110,7 +110,7 @@ router.patch("/users/:id/credit", adjustCredit);
 
 /**
  * @swagger
- * /admin/users/{id}/status:
+ * /v1/admin/users/{id}/status:
  *   patch:
  *     summary: Ban atau Unban user
  *     tags: [Admin Management]

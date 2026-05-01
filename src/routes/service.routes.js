@@ -13,7 +13,7 @@ const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 /**
  * @swagger
- * /services:
+ * /v1/services:
  *   get:
  *     summary: Ambil daftar layanan
  *     tags: [Services]
@@ -57,7 +57,7 @@ router.post(
 
 /**
  * @swagger
- * /services/{id}:
+ * /v1/services/{id}:
  *   put:
  *     summary: Edit layanan (Bisa update foto)
  *     tags: [Services]

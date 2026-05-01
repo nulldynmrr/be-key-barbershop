@@ -12,7 +12,7 @@ const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 /**
  * @swagger
- * /admin-billing/purchase:
+ * /v1/admin-billing/purchase:
  *   post:
  *     summary: Catat pembelian saldo baru
  *     tags: [Admin Billing]
@@ -53,7 +53,7 @@ router.post(
 
 /**
  * @swagger
- * /admin-billing/history:
+ * /v1/admin-billing/history:
  *   get:
  *     summary: Ambil riwayat pembelian saldo
  *     tags: [Admin Billing]

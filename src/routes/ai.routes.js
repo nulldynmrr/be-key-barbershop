@@ -84,7 +84,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 /**
  * @swagger
- * /ai/analyze-face:
+ * /v1/ai/analyze-face:
  *   post:
  *     summary: Analisis wajah untuk rekomendasi gaya rambut
  *     tags: [AI Analysis]
@@ -151,4 +151,3 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.post("/analyze-face", verifyToken, upload.single("foto"), analyzeFace);
 
 module.exports = router;
-  

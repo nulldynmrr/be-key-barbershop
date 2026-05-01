@@ -2,8 +2,9 @@ const { PrismaClient } = require("@prisma/client");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const { OAuth2Client } = require("google-auth-library");
-// Panggil skema validasi dari folder validations
 const { userRegisterSchema } = require("../validations/auth.validation");
+const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 const prisma = new PrismaClient();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -17,12 +18,10 @@ const generateToken = (user) => {
 exports.googleLogin = async (req, res) => {
   try {
     const { token } = req.body;
-
-    if (!token) {
+    if (!token)
       return res
         .status(400)
         .json({ success: false, message: "Token Google wajib dikirim" });
-    }
 
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -35,37 +34,87 @@ exports.googleLogin = async (req, res) => {
     let user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      const setting = await prisma.systemConfig.findFirst({
-        where: { id: 1 },
-      });
-      const initialCredit = 3;
-
       user = await prisma.user.create({
         data: {
           email: email,
           nama: name,
           role: "user",
           tipe_akun: "free",
-          sisa_credit: initialCredit,
+          sisa_credit: 3,
         },
       });
     }
 
-    const jwtToken = generateToken(user);
-
     res.status(200).json({
       success: true,
       message: "Login Google berhasil",
-      token: jwtToken,
+      token: generateToken(user),
       data: user,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: "Login Google gagal atau token tidak valid",
+      message: "Login Google gagal",
       error: error.message,
     });
   }
+};
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT,
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+exports.requestOTP = async (req, res) => {
+  const { email } = req.body;
+
+  const otp = crypto.randomInt(100000, 999999).toString();
+  const expires = new Date(Date.now() + 5 * 60 * 1000);
+
+  try {
+    await prisma.user.update({
+      where: { email },
+      data: { otp, otpExpires: expires },
+    });
+
+    await transporter.sendMail({
+      from: '"Key Barber Support" <no-reply@keybarber.com>',
+      to: email,
+      subject: "Kode OTP Verifikasi Kamu",
+      html: `<b>${otp}</b> adalah kode verifikasi kamu. Berlaku selama 5 menit.`,
+    });
+
+    res.status(200).json({ success: true, message: "OTP terkirim ke email!" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.verifyOTP = async (req, res) => {
+  const { email, otp } = req.body;
+
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user || user.otp !== otp) {
+    return res.status(400).json({ success: false, message: "Kode OTP salah!" });
+  }
+
+  if (new Date() > user.otpExpires) {
+    return res
+      .status(400)
+      .json({ success: false, message: "OTP sudah kadaluarsa!" });
+  }
+
+  await prisma.user.update({
+    where: { email },
+    data: { otp: null, otpExpires: null },
+  });
+
+  res.status(200).json({ success: true, message: "Verifikasi Berhasil!" });
 };
 
 exports.guestLogin = async (req, res) => {
@@ -97,21 +146,25 @@ exports.adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email dan password wajib diisi!" });
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user || user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Akses ditolak. Anda bukan Admin!",
-      });
+      return res
+        .status(403)
+        .json({ success: false, message: "Akses ditolak. Anda bukan Admin!" });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Password salah!",
-      });
+      return res
+        .status(401)
+        .json({ success: false, message: "Password salah!" });
     }
 
     const token = jwt.sign(
@@ -124,11 +177,7 @@ exports.adminLogin = async (req, res) => {
       success: true,
       message: "Selamat datang",
       token,
-      user: {
-        id: user.id,
-        nama: user.nama,
-        role: user.role,
-      },
+      user: { id: user.id, nama: user.nama, role: user.role },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -176,7 +225,6 @@ exports.userRegister = async (req, res) => {
     }
 
     const { nama, email, password } = validation.data;
-
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
@@ -199,18 +247,23 @@ exports.userRegister = async (req, res) => {
       },
     });
 
-    const jwtToken = generateToken(newUser);
-
     res.status(201).json({
       success: true,
-      message: "Akun berhasil dibuat. Selamat datang di Key Barber!",
-      token: jwtToken,
-      data: {
-        id: newUser.id,
-        nama: newUser.nama,
-        email: newUser.email,
-        sisa_credit: newUser.sisa_credit,
-      },
+      message: "Akun berhasil dibuat",
+      token: generateToken(newUser),
+      data: newUser,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    res.status(200).json({
+      success: true,
+      message: "Jika email terdaftar, instruksi reset akan dikirim.",
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

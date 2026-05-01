@@ -25,7 +25,7 @@ router.use(verifyToken, isAdmin);
 
 /**
  * @swagger
- * /ai-config/exchange:
+ * /v1/ai-config/exchange:
  *   get:
  *     summary: Ambil Master Exchange Setting (Kurs, Buffer, Multiplier)
  *     tags: [AI Engine Control]
@@ -64,7 +64,7 @@ router.put("/exchange", updateExchangeSetting);
 
 /**
  * @swagger
- * /ai-config/models:
+ * /v1/ai-config/models:
  *   get:
  *     summary: Ambil list konfigurasi Router AI (API Key otomatis disensor)
  *     tags: [AI Engine Control]
@@ -144,7 +144,7 @@ router.delete("/models/:id", deleteAiModel);
 
 /**
  * @swagger
- * /ai-config/models/{id}/status:
+ * /v1/ai-config/models/{id}/status:
  *   patch:
  *     summary: Toggle On/Off Router Aktif
  *     tags: [AI Engine Control]
@@ -174,7 +174,7 @@ router.patch("/models/:id/status", toggleModelStatus);
 
 /**
  * @swagger
- * /ai-config/models/test-connection:
+ * /v1/ai-config/models/test-connection:
  *   post:
  *     summary: Ping koneksi ke API Provider
  *     tags: [AI Engine Control]
@@ -202,7 +202,7 @@ router.post("/models/test-connection", testConnection);
 
 /**
  * @swagger
- * /ai-config/logs:
+ * /v1/ai-config/logs:
  *   get:
  *     summary: Ambil tabel riwayat token, modal, dan profit (Sesuai UI)
  *     tags: [AI Engine Control]

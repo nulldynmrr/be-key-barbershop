@@ -29,6 +29,8 @@ model User {
   device_cookie          String?        @unique
   status_langganan       Boolean        @default(false)
   tgl_berakhir_langganan DateTime?
+  otp                    String? 
+  otpExpires             DateTime?
   is_banned              Boolean        @default(false)
   createdAt              DateTime       @default(now())
   transactions           Transaction[]

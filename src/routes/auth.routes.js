@@ -12,7 +12,7 @@ const { verifyToken } = require("../middleware/auth.middleware");
 
 /**
  * @swagger
- * /auth/google:
+ * /v1/auth/google:
  *   post:
  *     summary: Login menggunakan Google OAuth
  *     tags: [Auth]
@@ -38,7 +38,7 @@ router.post("/google", authController.googleLogin);
 
 /**
  * @swagger
- * /auth/guest-login:
+ * /v1/auth/guest-login:
  *   post:
  *     summary: Login sebagai tamu (tanpa akun)
  *     tags: [Auth]
@@ -50,7 +50,7 @@ router.post("/guest-login", authController.guestLogin);
 
 /**
  * @swagger
- * /auth/admin/login:
+ * /v1/auth/admin/login:
  *   post:
  *     summary: Login khusus admin
  *     tags: [Auth]
@@ -107,7 +107,7 @@ router.post("/register", authController.register);
 
 /**
  * @swagger
- * /auth/user/register:
+ * /v1/auth/user/register:
  *   post:
  *     summary: Registrasi Akun Pelanggan (User Biasa)
  *     tags: [Auth]
@@ -138,5 +138,46 @@ router.post("/register", authController.register);
  *         description: Email sudah digunakan atau data tidak lengkap
  */
 router.post("/user/register", authController.userRegister);
+
+/**
+ * @swagger
+ * /v1/auth/forgot-password:
+ *   post:
+ *     summary: Permintaan reset password (Lupa Password)
+ *     description: Mengirimkan instruksi reset password ke email. Secara keamanan (Security Best Practice), endpoint ini akan selalu mengembalikan status 200 meskipun email tidak terdaftar untuk mencegah Email Enumeration Attack.
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "pelanggan@example.com"
+ *     responses:
+ *       200:
+ *         description: Instruksi berhasil dikirim (atau email tidak ditemukan, pesan tetap sama)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Jika email terdaftar, instruksi reset akan dikirim."
+ *       400:
+ *         description: Data input tidak valid atau email kosong
+ *       500:
+ *         description: Kesalahan server internal
+ */
+router.post("/forgot-password", authController.forgotPassword);
 
 module.exports = router;

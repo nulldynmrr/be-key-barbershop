@@ -1,21 +1,37 @@
-const jwt = require('jsonwebtoken');
+const jwt = require("jsonwebtoken");
 
 exports.verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ success: false, message: 'Akses ditolak. Token tidak ada.' });
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(" ")[1];
+
+    if (!token) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Token tidak ditemukan" });
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      if (err) {
+        return res.status(401).json({
+          success: true,
+          message: "Token tidak valid atau kadaluarsa",
+        });
+      }
+      req.user = decoded;
+      next();
+    });
   } catch (error) {
-    res.status(403).json({ success: false, message: 'Token tidak valid atau kadaluarsa.' });
+    return res.status(401).json({ success: false, message: "Akses tidak sah" });
   }
 };
 
 exports.isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ success: false, message: 'Memerlukan akses Admin.' });
+  if (req.user && req.user.role === "admin") {
+    next();
+  } else {
+    res
+      .status(403)
+      .json({ success: false, message: "Akses ditolak. Butuh izin Admin." });
   }
-  next();
 };

@@ -12,7 +12,7 @@ const router = Router();
  */
 /**
  * @swagger
- * /dashboard/main:
+ * /v1/dashboard/main:
  *   get:
  *     summary: Ambil semua data statistik halaman utama dashboard
  *     tags: [Dashboard Admin]

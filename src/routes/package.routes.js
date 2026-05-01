@@ -12,7 +12,7 @@ const router = Router();
 
 /**
  * @swagger
- * /packages/calculate-hpp:
+ * /v1/packages/calculate-hpp:
  *   post:
  *     summary: Hitung HPP Ideal secara live (Kalkulator Admin)
  *     tags: [Pricing & Packages]
@@ -39,7 +39,7 @@ router.post("/calculate-hpp", verifyToken, isAdmin, getLiveHPP);
 
 /**
  * @swagger
- * /packages:
+ * /v1/packages:
  *   get:
  *     summary: Ambil pricelist aktif (Koin & Langganan)
  *     tags: [Pricing & Packages]
@@ -58,7 +58,7 @@ router.get("/", getActivePackages);
 
 /**
  * @swagger
- * /packages:
+ * /v1/packages:
  *   post:
  *     summary: Buat paket harga baru (Admin Only)
  *     tags: [Pricing & Packages]
@@ -94,7 +94,7 @@ router.post("/", verifyToken, isAdmin, createPackage);
 
 /**
  * @swagger
- * /packages/{id}:
+ * /v1/packages/{id}:
  *   put:
  *     summary: Update paket / Aktifkan Promo (Admin)
  *     tags: [Pricing & Packages]
@@ -125,7 +125,7 @@ router.put("/:id", verifyToken, isAdmin, updatePackage);
 
 /**
  * @swagger
- * /packages/{id}:
+ * /v1/packages/{id}:
  *   delete:
  *     summary: Hapus paket harga (Admin)
  *     tags: [Pricing & Packages]
