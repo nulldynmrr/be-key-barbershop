@@ -216,7 +216,7 @@ exports.userRegister = async (req, res) => {
     const validation = userRegisterSchema.safeParse(req.body);
 
     if (!validation.success) {
-      const errorMessages = validation.error.errors.map((err) => err.message);
+      const errorMessages = validation.error.issues.map((err) => err.message);
       return res.status(400).json({
         success: false,
         message: "Validasi gagal",
@@ -225,11 +225,13 @@ exports.userRegister = async (req, res) => {
     }
 
     const { nama, email, password } = validation.data;
+
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "Email sudah terdaftar. Silakan login.",
+        message: "Email sudah terdaftar.",
+        errors: ["Email sudah terdaftar. Silakan login."],
       });
     }
 
@@ -247,14 +249,19 @@ exports.userRegister = async (req, res) => {
       },
     });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Akun berhasil dibuat",
       token: generateToken(newUser),
-      data: newUser,
+      data: { id: newUser.id, nama: newUser.nama, email: newUser.email },
     });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    console.error("userRegister error:", error.message);
+    return res.status(500).json({
+      success: false,
+      message: "Terjadi kesalahan server.",
+      errors: [error.message],
+    });
   }
 };
 
