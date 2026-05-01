@@ -1,5 +1,5 @@
-import { Router } from "express";
-import {
+const { Router } = require("express");
+const {
   getExchangeSetting,
   updateExchangeSetting,
   getAiModels,
@@ -8,8 +8,8 @@ import {
   getAiUsageLogs,
   toggleModelStatus,
   testConnection,
-} from "../controllers/aiconfig.controller.js";
-import { verifyToken, isAdmin } from "../middleware/auth.middleware.js";
+} = require("../controllers/aiconfig.controller");
+const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 const router = Router();
 
@@ -23,9 +23,6 @@ const router = Router();
 // Semua rute diamankan untuk Admin
 router.use(verifyToken, isAdmin);
 
-// =====================================
-// MASTER EXCHANGE ROUTES
-// =====================================
 /**
  * @swagger
  * /ai-config/exchange:
@@ -65,9 +62,6 @@ router.use(verifyToken, isAdmin);
 router.get("/exchange", getExchangeSetting);
 router.put("/exchange", updateExchangeSetting);
 
-// =====================================
-// AI MODEL CONFIG ROUTES (MAIA ROUTER)
-// =====================================
 /**
  * @swagger
  * /ai-config/models:
@@ -206,9 +200,6 @@ router.patch("/models/:id/status", toggleModelStatus);
  */
 router.post("/models/test-connection", testConnection);
 
-// =====================================
-// AI USAGE LOGS ROUTES
-// =====================================
 /**
  * @swagger
  * /ai-config/logs:
@@ -232,4 +223,4 @@ router.post("/models/test-connection", testConnection);
  */
 router.get("/logs", getAiUsageLogs);
 
-export default router;
+module.exports = router;

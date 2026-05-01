@@ -1,10 +1,9 @@
-import { PrismaClient } from "@prisma/client";
-import fetch from "node-fetch";
-import { encrypt, decrypt } from "../utils/encryption.js";
+const { PrismaClient } = require("@prisma/client");
+const { encrypt, decrypt } = require("../utils/encryption");
 
 const prisma = new PrismaClient();
 
-export const getExchangeSetting = async (req, res, next) => {
+exports.getExchangeSetting = async (req, res, next) => {
   try {
     let config = await prisma.systemConfig.findUnique({ where: { id: 1 } });
     if (!config) {
@@ -25,7 +24,7 @@ export const getExchangeSetting = async (req, res, next) => {
   }
 };
 
-export const updateExchangeSetting = async (req, res, next) => {
+exports.updateExchangeSetting = async (req, res, next) => {
   try {
     const { globalMultiplier, baseRateUsdIdr, inflationBuffer } = req.body;
     const config = await prisma.systemConfig.upsert({
@@ -43,7 +42,7 @@ export const updateExchangeSetting = async (req, res, next) => {
   }
 };
 
-export const getAiModels = async (req, res, next) => {
+exports.getAiModels = async (req, res, next) => {
   try {
     const models = await prisma.aiModel.findMany({
       orderBy: { namaRouter: "asc" },
@@ -60,7 +59,7 @@ export const getAiModels = async (req, res, next) => {
   }
 };
 
-export const saveAiModel = async (req, res, next) => {
+exports.saveAiModel = async (req, res, next) => {
   try {
     const { id } = req.params;
     const {
@@ -130,7 +129,7 @@ export const saveAiModel = async (req, res, next) => {
   }
 };
 
-export const deleteAiModel = async (req, res, next) => {
+exports.deleteAiModel = async (req, res, next) => {
   try {
     await prisma.aiModel.delete({ where: { id: req.params.id } });
     res
@@ -141,7 +140,7 @@ export const deleteAiModel = async (req, res, next) => {
   }
 };
 
-export const toggleModelStatus = async (req, res, next) => {
+exports.toggleModelStatus = async (req, res, next) => {
   try {
     const { isActive } = req.body;
     await prisma.aiModel.update({
@@ -157,7 +156,7 @@ export const toggleModelStatus = async (req, res, next) => {
   }
 };
 
-export const testConnection = async (req, res, next) => {
+exports.testConnection = async (req, res, next) => {
   try {
     let { baseUrl, apiKey, id } = req.body;
     if (!baseUrl)
@@ -198,7 +197,7 @@ export const testConnection = async (req, res, next) => {
   }
 };
 
-export const getAiUsageLogs = async (req, res, next) => {
+exports.getAiUsageLogs = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
