@@ -119,6 +119,7 @@ model AiModel {
   maxBudget       Float
   rpmLimit        Int
   avgTokensPerUse Int    @default(2000) // Estimasi token per 1x aksi
+  isActive        Boolean  @default(true)
 }
 
 model Feedback {

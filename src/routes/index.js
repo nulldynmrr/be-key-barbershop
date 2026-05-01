@@ -3,17 +3,19 @@ const router = express.Router();
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("../config/swagger");
 
-const authRoutes = require("./auth.routes");
-const serviceRoutes = require("./service.routes");
-const aiConfigRoutes = require("./aiconfig.routes");
-const aiRoutes = require("./ai.routes");
-const barberRoutes = require("./barber.routes");
-const paymentRoutes = require("./payment.routes");
-const dashboardRoutes = require("./dashboard.routes");
-const adminBillingRoutes = require("./adminBilling.routes");
-const adminRoutes = require("./admin.routes");
-const userRoutes = require("./user.routes");
-const packageRoutes = require("./package.routes");
+const r = (mod) => mod.default || mod;
+
+const authRoutes = r(require("./auth.routes"));
+const serviceRoutes = r(require("./service.routes"));
+const aiConfigRoutes = r(require("./aiconfig.routes"));
+const aiRoutes = r(require("./ai.routes"));
+const barberRoutes = r(require("./barber.routes"));
+const paymentRoutes = r(require("./payment.routes"));
+const dashboardRoutes = r(require("./dashboard.routes"));
+const adminBillingRoutes = r(require("./adminBilling.routes"));
+const adminRoutes = r(require("./admin.routes"));
+const userRoutes = r(require("./user.routes"));
+const packageRoutes = r(require("./package.routes"));
 
 router.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 router.use("/auth", authRoutes);
@@ -26,6 +28,6 @@ router.use("/dashboard", dashboardRoutes);
 router.use("/admin-billing", adminBillingRoutes);
 router.use("/admin", adminRoutes);
 router.use("/users", userRoutes);
-router.use("/api/v1/packages", packageRoutes);
+router.use("/packages", packageRoutes);
 
 module.exports = router;

@@ -2,6 +2,8 @@ const { PrismaClient } = require("@prisma/client");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const { OAuth2Client } = require("google-auth-library");
+// Panggil skema validasi dari folder validations
+const { userRegisterSchema } = require("../validations/auth.validation");
 
 const prisma = new PrismaClient();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -33,10 +35,10 @@ exports.googleLogin = async (req, res) => {
     let user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      const setting = await prisma.systemSetting.findFirst({
+      const setting = await prisma.systemConfig.findFirst({
         where: { id: 1 },
       });
-      const initialCredit = setting ? setting.default_new_user_credit : 3;
+      const initialCredit = 3;
 
       user = await prisma.user.create({
         data: {
@@ -154,6 +156,61 @@ exports.register = async (req, res) => {
       success: true,
       message: "Admin berhasil dibuat!",
       data: { email: user.email, nama: user.nama },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.userRegister = async (req, res) => {
+  try {
+    const validation = userRegisterSchema.safeParse(req.body);
+
+    if (!validation.success) {
+      const errorMessages = validation.error.errors.map((err) => err.message);
+      return res.status(400).json({
+        success: false,
+        message: "Validasi gagal",
+        errors: errorMessages,
+      });
+    }
+
+    const { nama, email, password } = validation.data;
+
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Email sudah terdaftar. Silakan login.",
+      });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = await prisma.user.create({
+      data: {
+        nama,
+        email,
+        password: hashedPassword,
+        role: "user",
+        tipe_akun: "free",
+        sisa_credit: 3,
+      },
+    });
+
+    const jwtToken = generateToken(newUser);
+
+    res.status(201).json({
+      success: true,
+      message: "Akun berhasil dibuat. Selamat datang di Key Barber!",
+      token: jwtToken,
+      data: {
+        id: newUser.id,
+        nama: newUser.nama,
+        email: newUser.email,
+        sisa_credit: newUser.sisa_credit,
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

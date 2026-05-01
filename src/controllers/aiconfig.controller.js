@@ -1,88 +1,242 @@
-const { PrismaClient } = require("@prisma/client");
+import { PrismaClient } from "@prisma/client";
+import fetch from "node-fetch";
+import { encrypt, decrypt } from "../utils/encryption.js";
+
 const prisma = new PrismaClient();
-const { encrypt } = require("../utils/encryption");
 
-exports.getAllConfigs = async (req, res) => {
+export const getExchangeSetting = async (req, res, next) => {
   try {
-    const configs = await prisma.aiModelConfig.findMany();
-    res.status(200).json({ success: true, data: configs });
+    let config = await prisma.systemConfig.findUnique({ where: { id: 1 } });
+    if (!config) {
+      config = await prisma.systemConfig.create({
+        data: {
+          id: 1,
+          globalMultiplier: 1.35,
+          baseRateUsdIdr: 17332,
+          inflationBuffer: 0.05,
+          adminFeeFixed: 4500.0,
+          mdrPercentage: 0.007,
+        },
+      });
+    }
+    res.status(200).json({ success: true, data: config });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };
 
-exports.createConfig = async (req, res) => {
+export const updateExchangeSetting = async (req, res, next) => {
   try {
-    const data = req.body;
+    const { globalMultiplier, baseRateUsdIdr, inflationBuffer } = req.body;
+    const config = await prisma.systemConfig.upsert({
+      where: { id: 1 },
+      update: { globalMultiplier, baseRateUsdIdr, inflationBuffer },
+      create: { id: 1, globalMultiplier, baseRateUsdIdr, inflationBuffer },
+    });
+    res.status(200).json({
+      success: true,
+      message: "Master Exchange berhasil disimpan",
+      data: config,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    if (
-      !data.router_name ||
-      !data.api_key ||
-      !data.model_name ||
-      !data.tipe_ai
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Kolom router_name, api_key, model_name, dan tipe_ai WAJIB diisi!",
+export const getAiModels = async (req, res, next) => {
+  try {
+    const models = await prisma.aiModel.findMany({
+      orderBy: { namaRouter: "asc" },
+    });
+
+    const maskedModels = models.map((m) => {
+      const maskedKey = "********" + m.apiKey.substring(m.apiKey.length - 4);
+      return { ...m, apiKey: maskedKey };
+    });
+
+    res.status(200).json({ success: true, data: maskedModels });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const saveAiModel = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const {
+      namaRouter,
+      baseUrl,
+      modelName,
+      apiKey,
+      typeAi,
+      hargaInput1M,
+      hargaOutput1M,
+      maxBudget,
+      rpmLimit,
+      isActive,
+    } = req.body;
+
+    let modelConfig;
+    if (id) {
+      const updateData = {
+        namaRouter,
+        baseUrl,
+        modelName,
+        typeAi,
+        hargaInput1M,
+        hargaOutput1M,
+        maxBudget,
+        rpmLimit,
+        isActive,
+      };
+
+      if (apiKey && !apiKey.includes("***")) {
+        updateData.apiKey = encrypt(apiKey);
+      }
+
+      modelConfig = await prisma.aiModel.update({
+        where: { id },
+        data: updateData,
+      });
+    } else {
+      if (!apiKey)
+        return res.status(400).json({
+          success: false,
+          message: "API Key wajib diisi untuk model baru!",
+        });
+
+      modelConfig = await prisma.aiModel.create({
+        data: {
+          namaRouter,
+          baseUrl,
+          modelName,
+          typeAi,
+          hargaInput1M,
+          hargaOutput1M,
+          maxBudget,
+          rpmLimit,
+          isActive,
+          apiKey: encrypt(apiKey),
+        },
       });
     }
+    res.status(200).json({
+      success: true,
+      message: "Konfigurasi Model AI berhasil disimpan",
+      data: modelConfig,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    data.api_key = encrypt(data.api_key);
-
-    const newConfig = await prisma.aiModelConfig.create({ data });
+export const deleteAiModel = async (req, res, next) => {
+  try {
+    await prisma.aiModel.delete({ where: { id: req.params.id } });
     res
-      .status(201)
-      .json({ success: true, message: "Berhasil ditambah", data: newConfig });
+      .status(200)
+      .json({ success: true, message: "Model AI berhasil dihapus" });
   } catch (error) {
-    if (error.code === "P2002") {
-      return res.status(400).json({
-        success: false,
-        message:
-          "tipe_ai ini sudah ada di database. Silakan gunakan tipe_ai lain atau edit yang sudah ada.",
-      });
-    }
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };
 
-exports.updateConfig = async (req, res) => {
+export const toggleModelStatus = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    let dataUpdate = { ...req.body };
+    const { isActive } = req.body;
+    await prisma.aiModel.update({
+      where: { id: req.params.id },
+      data: { isActive },
+    });
+    res.status(200).json({
+      success: true,
+      message: `Router berhasil di-${isActive ? "aktifkan" : "matikan"}`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    if (dataUpdate.api_key) {
-      dataUpdate.api_key = encrypt(dataUpdate.api_key);
+export const testConnection = async (req, res, next) => {
+  try {
+    let { baseUrl, apiKey, id } = req.body;
+    if (!baseUrl)
+      return res
+        .status(400)
+        .json({ success: false, message: "Base URL wajib diisi" });
+
+    if (apiKey && apiKey.includes("***") && id) {
+      const existingModel = await prisma.aiModel.findUnique({ where: { id } });
+      if (!existingModel)
+        return res
+          .status(404)
+          .json({ success: false, message: "Model tidak ditemukan" });
+      apiKey = decrypt(existingModel.apiKey);
     }
 
-    const updatedConfig = await prisma.aiModelConfig.update({
-      where: { id: Number(id) },
-      data: dataUpdate,
+    if (!apiKey || apiKey.includes("***")) {
+      return res
+        .status(400)
+        .json({ success: false, message: "API Key tidak valid untuk ditest" });
+    }
+
+    const response = await fetch(`${baseUrl}/models`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok)
+      throw new Error(`Koneksi Gagal: Error ${response.status}`);
+    res
+      .status(200)
+      .json({ success: true, message: "Koneksi API Berhasil! Sistem siap." });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+export const getAiUsageLogs = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const [total, logs, config] = await Promise.all([
+      prisma.systemApiLog.count(),
+      prisma.systemApiLog.findMany({
+        skip,
+        take: limit,
+        orderBy: { tgl_penggunaan: "desc" },
+        include: { user: { select: { email: true } } },
+      }),
+      prisma.systemConfig.findUnique({ where: { id: 1 } }),
+    ]);
+
+    const globalMultiplier = config?.globalMultiplier || 1.35;
+    const formattedLogs = logs.map((log) => {
+      const modalUsd = Number(log.cost_usd);
+      const chargeUsd = modalUsd * globalMultiplier;
+      const profitUsd = chargeUsd - modalUsd;
+      return {
+        id: log.id,
+        timestamp: log.tgl_penggunaan,
+        email_user: log.user?.email || "Unknown",
+        tokens_in_out: `${log.input_tokens} / ${log.output_tokens}`,
+        modal_api_usd: `$${modalUsd.toFixed(5)}`,
+        charge_user_usd: `$${chargeUsd.toFixed(5)}`,
+        profit_usd: `+$${profitUsd.toFixed(5)}`,
+      };
     });
 
     res.status(200).json({
       success: true,
-      message: "Berhasil diupdate",
-      data: updatedConfig,
+      data: formattedLogs,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-exports.deleteConfig = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    await prisma.aiModelConfig.delete({
-      where: { id: Number(id) },
-    });
-
-    res.status(200).json({
-      success: true,
-      message: "Config berhasil dihapus",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    next(error);
   }
 };

@@ -20,7 +20,7 @@ router.use(verifyToken);
 
 /**
  * @swagger
- * /api/v1/user/profile:
+ * /user/profile:
  *   get:
  *     summary: Ambil profil diri sendiri
  *     tags: [User Area]
@@ -55,7 +55,7 @@ router.put("/profile", updateProfile);
 
 /**
  * @swagger
- * /api/v1/user/ai-history:
+ * /user/ai-history:
  *   get:
  *     summary: Ambil riwayat generate AI milik sendiri
  *     tags: [User Area]
@@ -80,7 +80,7 @@ router.get("/ai-history", getAiHistory);
 
 /**
  * @swagger
- * /api/v1/user/transactions:
+ * /user/transactions:
  *   get:
  *     summary: Ambil riwayat transaksi milik sendiri
  *     tags: [User Area]

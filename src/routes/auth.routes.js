@@ -80,7 +80,7 @@ router.post("/admin/login", authController.adminLogin);
  * @swagger
  * /auth/register:
  *   post:
- *     summary: Registrasi akun baru
+ *     summary: Registrasi Admin Baru (Internal Use Only)
  *     tags: [Auth]
  *     requestBody:
  *       required: true
@@ -102,9 +102,41 @@ router.post("/admin/login", authController.adminLogin);
  *     responses:
  *       201:
  *         description: Registrasi berhasil
- *       400:
- *         description: Email sudah digunakan atau data tidak valid
  */
 router.post("/register", authController.register);
+
+/**
+ * @swagger
+ * /auth/user/register:
+ *   post:
+ *     summary: Registrasi Akun Pelanggan (User Biasa)
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - nama
+ *               - email
+ *               - password
+ *             properties:
+ *               nama:
+ *                 type: string
+ *                 example: "Dinar Muhammad Akbar"
+ *               email:
+ *                 type: string
+ *                 example: "dinar@example.com"
+ *               password:
+ *                 type: string
+ *                 example: "rahasia123"
+ *     responses:
+ *       201:
+ *         description: Akun User berhasil dibuat dan token diterbitkan
+ *       400:
+ *         description: Email sudah digunakan atau data tidak lengkap
+ */
+router.post("/user/register", authController.userRegister);
 
 module.exports = router;

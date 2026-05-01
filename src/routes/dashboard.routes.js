@@ -1,41 +1,27 @@
-const express = require("express");
-const router = express.Router();
-const dashboardController = require("../controllers/dashboard.controller");
+const { Router } = require("express");
+const { getDashboardData } = require("../controllers/dashboard.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
+
+const router = Router();
 
 /**
  * @swagger
  * tags:
- *   - name: Dashboard
- *     description: Statistik dan analitik keuangan admin
+ *   - name: Dashboard Admin
+ *     description: Endpoint statistik dan analitik keuangan admin (Terpadu)
  */
-
 /**
  * @swagger
- * /dashboard/stats:
+ * /dashboard/main:
  *   get:
- *     summary: Ambil ringkasan statistik (User, Cost AI, Saldo USD)
- *     tags: [Dashboard]
+ *     summary: Ambil semua data statistik halaman utama dashboard
+ *     tags: [Dashboard Admin]
  *     security:
  *       - bearerAuth: []
  *     responses:
- *       '200':
- *         description: Berhasil mengambil data statistik
+ *       200:
+ *         description: Berhasil mengambil data dashboard
  */
-router.get("/stats", verifyToken, isAdmin, dashboardController.getStats);
-
-/**
- * @swagger
- * /dashboard/logs:
- *   get:
- *     summary: Ambil riwayat aktivitas penggunaan AI mendetail
- *     tags: [Dashboard]
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       '200':
- *         description: Berhasil mengambil log aktivitas
- */
-router.get("/logs", verifyToken, isAdmin, dashboardController.getActivityLogs);
+router.get("/main", verifyToken, isAdmin, getDashboardData);
 
 module.exports = router;
