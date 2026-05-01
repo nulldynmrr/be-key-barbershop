@@ -4,7 +4,6 @@ const multer = require("multer");
 const { analyzeFace } = require("../controllers/ai.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 
-// Multer config — simpan di memory buffer
 const upload = multer({ storage: multer.memoryStorage() });
 
 /**
@@ -58,17 +57,13 @@ const upload = multer({ storage: multer.memoryStorage() });
  *       type: object
  *       properties:
  *         id:
- *           type: integer
- *           example: 1
+ *           type: string
  *         user_id:
- *           type: integer
- *           example: 5
+ *           type: string
  *         url_foto_upload:
  *           type: string
- *           example: "/uploads/ai_results/foto.jpg"
  *         harga_credit_terpakai:
  *           type: integer
- *           example: 1
  *         hasil_analisis:
  *           type: object
  *           properties:
@@ -98,55 +93,24 @@ const upload = multer({ storage: multer.memoryStorage() });
  *             type: object
  *             required:
  *               - foto
+ *               - requestedFeatures
  *             properties:
  *               foto:
  *                 type: string
  *                 format: binary
- *                 description: Foto wajah (jpg/png)
+ *               requestedFeatures:
+ *                 type: array
+ *                 items:
+ *                   type: string
  *     responses:
  *       200:
  *         description: Analisis berhasil
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Analisis berhasil"
- *                 data:
- *                   $ref: '#/components/schemas/AiGenerationResult'
  *       400:
  *         description: Foto tidak diunggah
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Harap unggah foto wajah."
- *       403:
+ *       402:
  *         description: Credit tidak cukup
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Credit tidak mencukupi."
  *       401:
- *         description: Unauthorized - Token tidak valid
+ *         description: Unauthorized
  */
 router.post("/analyze-face", verifyToken, upload.single("foto"), analyzeFace);
 

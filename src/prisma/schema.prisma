@@ -190,3 +190,12 @@ model SubscriptionPackage {
 
   status String @default("AKTIF")
 }
+
+model FeaturePricing {
+  id          String   @id @default(uuid())
+  featureCode String   @unique 
+  namaFitur   String   
+  koinCost    Int    
+  isActive    Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+}

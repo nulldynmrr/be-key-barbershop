@@ -1,5 +1,7 @@
+const axios = require("axios");
+const fs = require("fs");
 const { PrismaClient } = require("@prisma/client");
-const { encrypt, decrypt } = require("../utils/encryption");
+const { decrypt, encrypt } = require("../utils/encryption");
 
 const prisma = new PrismaClient();
 
@@ -237,5 +239,34 @@ exports.getAiUsageLogs = async (req, res, next) => {
     });
   } catch (error) {
     next(error);
+  }
+};
+
+exports.getFeaturePricing = async (req, res) => {
+  try {
+    const pricing = await prisma.featurePricing.findMany();
+    res.status(200).json({ success: true, data: pricing });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateFeaturePrice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { koinCost, isActive } = req.body;
+
+    const updatedPricing = await prisma.featurePricing.update({
+      where: { id },
+      data: { koinCost, isActive },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Harga fitur berhasil diperbarui",
+      data: updatedPricing,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };

@@ -8,10 +8,14 @@ const {
   getAiUsageLogs,
   toggleModelStatus,
   testConnection,
+  getFeaturePricing,
+  updateFeaturePrice,
 } = require("../controllers/aiconfig.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 const router = Router();
+
+router.use(verifyToken, isAdmin);
 
 /**
  * @swagger
@@ -19,9 +23,6 @@ const router = Router();
  *   - name: AI Engine Control
  *     description: Pengaturan Model AI, Kurs Mata Uang, dan Log Penggunaan
  */
-
-// Semua rute diamankan untuk Admin
-router.use(verifyToken, isAdmin);
 
 /**
  * @swagger
@@ -66,7 +67,7 @@ router.put("/exchange", updateExchangeSetting);
  * @swagger
  * /v1/ai-config/models:
  *   get:
- *     summary: Ambil list konfigurasi Router AI (API Key otomatis disensor)
+ *     summary: Ambil list konfigurasi Router AI
  *     tags: [AI Engine Control]
  *     security:
  *       - bearerAuth: []
@@ -189,7 +190,6 @@ router.patch("/models/:id/status", toggleModelStatus);
  *             properties:
  *               id:
  *                 type: string
- *                 description: Kirim ID jika mengetes model yang sudah tersimpan
  *               baseUrl:
  *                 type: string
  *               apiKey:
@@ -204,7 +204,7 @@ router.post("/models/test-connection", testConnection);
  * @swagger
  * /v1/ai-config/logs:
  *   get:
- *     summary: Ambil tabel riwayat token, modal, dan profit (Sesuai UI)
+ *     summary: Ambil tabel riwayat token, modal, dan profit
  *     tags: [AI Engine Control]
  *     security:
  *       - bearerAuth: []
@@ -222,5 +222,52 @@ router.post("/models/test-connection", testConnection);
  *         description: Berhasil mengambil log penggunaan
  */
 router.get("/logs", getAiUsageLogs);
+
+/**
+ * @swagger
+ * /v1/ai-config/feature-pricing:
+ *   get:
+ *     summary: Ambil daftar harga koin per-fitur
+ *     tags: [AI Engine Control]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Berhasil mengambil data pricing
+ */
+router.get("/feature-pricing", getFeaturePricing);
+
+/**
+ * @swagger
+ * /v1/ai-config/feature-pricing/{id}:
+ *   put:
+ *     summary: Update harga koin untuk fitur tertentu
+ *     tags: [AI Engine Control]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               koinCost:
+ *                 type: integer
+ *                 example: 5
+ *               isActive:
+ *                 type: boolean
+ *                 example: true
+ *     responses:
+ *       200:
+ *         description: Berhasil update harga koin
+ */
+router.put("/feature-pricing/:id", updateFeaturePrice);
 
 module.exports = router;
