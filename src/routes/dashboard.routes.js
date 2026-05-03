@@ -1,5 +1,5 @@
 const { Router } = require("express");
-const { getDashboardData } = require("../controllers/dashboard.controller");
+const dashboardController = require("../controllers/dashboard.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 const router = Router();
@@ -10,6 +10,7 @@ const router = Router();
  *   - name: Dashboard Admin
  *     description: Endpoint statistik dan analitik keuangan admin (Terpadu)
  */
+
 /**
  * @swagger
  * /v1/dashboard/main:
@@ -22,6 +23,6 @@ const router = Router();
  *       200:
  *         description: Berhasil mengambil data dashboard
  */
-router.get("/main", verifyToken, isAdmin, getDashboardData);
+router.get("/main", verifyToken, isAdmin, dashboardController.getDashboardMain);
 
 module.exports = router;
