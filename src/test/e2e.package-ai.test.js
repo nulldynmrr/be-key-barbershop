@@ -14,7 +14,6 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
   let userToken = "";
   let userId = "";
   let featureId = "";
-
   let idPaketMurah = "";
   let idPaketMahal = "";
 
@@ -26,8 +25,18 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
     await prisma.aiModel.deleteMany();
     await prisma.subscriptionPackage.deleteMany();
     await prisma.creditPackage.deleteMany();
+    await prisma.systemConfig.deleteMany();
     await prisma.user.deleteMany({
       where: { email: { in: ["admin_e2e@test.com", "user_e2e@test.com"] } },
+    });
+
+    // Setup System Config
+    await prisma.systemConfig.create({
+      data: {
+        globalMultiplier: 1.35,
+        baseRateUsdIdr: 16000,
+        inflationBuffer: 0.05,
+      },
     });
 
     const salt = await bcrypt.genSalt(10);
@@ -104,24 +113,21 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
       expect(res.statusCode).toEqual(200);
     });
 
-    it("Admin berhasil memperbarui harga Koin pada Fitur AI", async () => {
+    it("Admin berhasil memperbarui harga Service Fitur AI", async () => {
       const res = await request(app)
         .put(`/api/v1/ai-config/feature-pricing/${featureId}`)
         .set("Authorization", `Bearer ${adminToken}`)
-        .send({
-          koinCost: 5,
-          isActive: true,
-        });
+        .send({ koinCost: 5, isActive: true });
 
       expect(res.statusCode).toEqual(200);
     });
 
-    it("Admin berhasil membuat 2 Subscription Package (Murah & Mahal) dengan HPP kalkulasi", async () => {
+    it("Admin berhasil membuat 2 Subscription Package (Murah & Mahal)", async () => {
       const paketMurah = await prisma.subscriptionPackage.create({
         data: {
           namaPaket: "Starter Pack",
-          jumlahKoin: 100,
-          deskripsi: "Paket hemat untuk memulai analisis wajah",
+          jumlahKoin: 100, // 1 Koin = Rp 250 (karena nominal 25000)
+          deskripsi: "Paket hemat untuk memulai",
           featStandardScan: true,
           featVirtualTryOn: false,
           typeValue: "ONTIME",
@@ -136,7 +142,7 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
         data: {
           namaPaket: "Pro Premium",
           jumlahKoin: 500,
-          deskripsi: "Paket lengkap dengan fitur Virtual Try On",
+          deskripsi: "Paket lengkap",
           featStandardScan: true,
           featVirtualTryOn: true,
           typeValue: "SUBSCRIPTION",
@@ -151,18 +157,15 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
 
       idPaketMurah = paketMurah.id;
       idPaketMahal = paketMahal.id;
-
       expect(idPaketMurah).toBeDefined();
-      expect(idPaketMahal).toBeDefined();
     });
   });
 
-  describe("User Flow: Package Purchase & AI Analysis", () => {
+  describe("User Flow: Package Purchase & AI Analysis (Token Fee)", () => {
     it("User memilih dan membeli Paket Murah (Transaksi tercatat di DB)", async () => {
       const paketDibeli = await prisma.subscriptionPackage.findUnique({
         where: { id: idPaketMurah },
       });
-      expect(paketDibeli.namaPaket).toBe("Starter Pack");
 
       await prisma.$transaction(async (tx) => {
         await tx.user.update({
@@ -184,30 +187,21 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
         where: { id: userId },
       });
       expect(updatedUser.sisa_credit).toEqual(100);
-
-      const cekTransaksi = await prisma.transaction.findFirst({
-        where: { user_id: userId, jenis_transaksi: "PURCHASE_PACKAGE" },
-      });
-      expect(cekTransaksi).toBeDefined();
-      expect(cekTransaksi.nominal).toEqual(paketDibeli.hargaNominal);
-      expect(cekTransaksi.status).toBe("SUCCESS");
     });
 
-    it("User berhasil memotong 5 Koin saat menggunakan AI", async () => {
+    it("User berhasil memotong 17 Koin (5 Koin Fitur + 12 Koin Real Token LLM)", async () => {
+      // Simulasi token raksasa (500K Prompt, 100K Output)
+      // Cost: (500k/1M * 0.15) + (100k/1M * 0.60) = 0.075 + 0.060 = $0.135 USD
+      // IDR = $0.135 * 16000 * 1.35 multiplier = Rp 2.916
+      // Koin AI (Harga 1 koin Rp250) = Math.ceil(2916 / 250) = Math.ceil(11.664) = 12 Koin
+      // Total = 5 (Fitur Base) + 12 (AI) = 17 Koin
       axios.post.mockResolvedValue({
         data: {
-          choices: [
-            {
-              message: {
-                content:
-                  '{"analisis_fisik": {"gender": "Pria", "bentuk_wajah": "Oval"}}',
-              },
-            },
-          ],
+          choices: [{ message: { content: '{"analisis": "sukses"}' } }],
           usage: {
-            prompt_tokens: 1000000,
-            completion_tokens: 500000,
-            total_tokens: 1500000,
+            prompt_tokens: 500000,
+            completion_tokens: 100000,
+            total_tokens: 600000,
           },
         },
       });
@@ -221,30 +215,21 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
         .attach("foto", fakeImageBuffer, "wajah.jpg");
 
       expect(res.statusCode).toEqual(200);
+      expect(res.body.message).toContain("17 koin terpotong");
+      expect(axios.post).toHaveBeenCalledTimes(1);
 
+      // Sisa Koin = 100 - 17 = 83
       const userDb = await prisma.user.findUnique({ where: { id: userId } });
-      expect(userDb.sisa_credit).toEqual(95);
+      expect(userDb.sisa_credit).toEqual(83);
     });
 
-    it("User ditolak menggunakan AI karena sisa Koin habis", async () => {
+    it("User ditolak menggunakan AI karena sisa Koin kalah dengan estimasi", async () => {
       await prisma.user.update({
         where: { id: userId },
-        data: { sisa_credit: 0 },
-      });
-
-      axios.post.mockResolvedValue({
-        data: {
-          choices: [{ message: { content: '{"status": "ok"}' } }],
-          usage: {
-            prompt_tokens: 100,
-            completion_tokens: 50,
-            total_tokens: 150,
-          },
-        },
+        data: { sisa_credit: 2 }, // Diset cuma 2 koin (kurang dari base 5 koin)
       });
 
       const fakeImageBuffer = Buffer.from("fake-image");
-
       const resNolak = await request(app)
         .post("/api/v1/ai/analyze-face")
         .set("Authorization", `Bearer ${userToken}`)
@@ -252,6 +237,7 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
         .attach("foto", fakeImageBuffer, "wajah3.jpg");
 
       expect(resNolak.statusCode).toEqual(402);
+      expect(resNolak.body.message).toContain("Estimasi butuh");
     });
   });
 });

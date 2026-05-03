@@ -1,6 +1,4 @@
 const axios = require("axios");
-const fs = require("fs");
-const path = require("path");
 const { PrismaClient } = require("@prisma/client");
 const { decrypt } = require("../utils/encryption");
 const { faceAnalysisSchema } = require("../validations/ai.validation");
@@ -11,7 +9,6 @@ exports.analyzeFace = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Validasi file upload 
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -19,7 +16,7 @@ exports.analyzeFace = async (req, res) => {
       });
     }
 
-    // Parse requestedFeatures
+    // parsing dan Validasi Fitur 
     let parsedFeatures = req.body.requestedFeatures;
     if (typeof parsedFeatures === "string") {
       try {
@@ -29,7 +26,6 @@ exports.analyzeFace = async (req, res) => {
       }
     }
 
-    // Validasi Zod
     const validation = faceAnalysisSchema.safeParse({
       requestedFeatures: parsedFeatures,
     });
@@ -44,33 +40,38 @@ exports.analyzeFace = async (req, res) => {
 
     const { requestedFeatures } = validation.data;
 
-    // Hitung harga dinamis dari DB
+    //  Daftar Harga Fitur
     const pricingList = await prisma.featurePricing.findMany({
       where: { isActive: true },
     });
 
-    let totalKoinDipotong = 0;
+    let totalKoinFitur = 0;
     for (const feature of requestedFeatures) {
       const dbFeature = pricingList.find((p) => p.featureCode === feature);
       if (!dbFeature) {
         return res.status(400).json({
           success: false,
-          message: `Fitur '${feature}' tidak dikenali atau sedang dinonaktifkan.`,
+          message: `Fitur '${feature}' tidak dikenali atau dinonaktifkan.`,
         });
       }
-      totalKoinDipotong += dbFeature.koinCost;
+      totalKoinFitur += dbFeature.koinCost;
     }
 
-    // Cek saldo koin user
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.sisa_credit < totalKoinDipotong) {
-      return res.status(402).json({
-        success: false,
-        message: `Credit tidak mencukupi. Butuh ${totalKoinDipotong} koin, sisa: ${user?.sisa_credit ?? 0}. Silakan Top-Up.`,
-      });
+    // Konfigurasi Sistem untuk Perhitungan Mata Uang (IDR)
+    const sysConfig = await prisma.systemConfig.findFirst();
+    const rateIdr = sysConfig?.baseRateUsdIdr || 16000;
+    const multiplier = sysConfig?.globalMultiplier || 1.35;
+
+    let hargaPerKoinIdr = 250;
+    const subPack = await prisma.subscriptionPackage.findFirst({
+      where: { status: "AKTIF" },
+      orderBy: { hargaNominal: "asc" },
+    });
+    if (subPack && subPack.jumlahKoin > 0) {
+      hargaPerKoinIdr = subPack.hargaNominal / subPack.jumlahKoin;
     }
 
-    // Ambil konfigurasi AI aktif 
+    // Konfigurasi Model AI 
     const config = await prisma.aiModel.findFirst({
       where: { isActive: true },
     });
@@ -78,25 +79,52 @@ exports.analyzeFace = async (req, res) => {
     if (!config) {
       return res.status(500).json({
         success: false,
-        message: "Konfigurasi AI belum diatur oleh Admin.",
+        message: "Konfigurasi AI belum diatur Admin.",
       });
     }
 
-    // Simpan file ke disk
-    const safeFilename = `${Date.now()}-${req.file.originalname.replace(/\s+/g, "-")}`;
-    const uploadDir = path.join(__dirname, "../public/uploads/ai_results");
-    const filePath = path.join(uploadDir, safeFilename);
+    const tarifIn = Number(config.hargaInput1M) || 0;
+    const tarifOut = Number(config.hargaOutput1M) || 0;
 
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
+    // [PRE-CHECK] Estimasi Biaya Token
+    const avgTokens = config.avgTokensPerUse || 2000;
+    const estCostUsd = (avgTokens / 1000000) * ((tarifIn + tarifOut) / 2);
+    const estCostIdr = estCostUsd * rateIdr * multiplier;
+    const estKoinAi = Math.ceil(estCostIdr / hargaPerKoinIdr);
+    const minKoinRequired = totalKoinFitur + estKoinAi;
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.sisa_credit < minKoinRequired) {
+      return res.status(402).json({
+        success: false,
+        message: `Credit tidak mencukupi. Estimasi butuh ${minKoinRequired} koin (Fitur: ${totalKoinFitur}, Token AI: ${estKoinAi}). Sisa koin Anda: ${user?.sisa_credit || 0}.`,
+      });
     }
-    fs.writeFileSync(filePath, req.file.buffer);
 
-    const url_foto_upload = `/uploads/ai_results/${safeFilename}`;
-
-    // Panggil AI API
     const decryptedApiKey = decrypt(config.apiKey);
     const imageBase64 = req.file.buffer.toString("base64");
+    const safeFilename = `${Date.now()}-${req.file.originalname.replace(/\s+/g, "-")}`;
+    const url_foto_upload = `/uploads/ai_results/${safeFilename}`;
+
+    const currentYear = new Date().getFullYear();
+
+    const systemInstruction = `Kamu adalah AI Master Stylist & Konsultan Morfologi Wajah tahun ${currentYear}. Tugas mutlakmu: Lakukan analisis MURNI dan KLINIS. 
+    LANGKAH 0 (KUALITAS & ORIENTASI FOTO): 
+    - Evaluasi apakah wajah MENGHADAP DEPAN secara utuh (Frontal View).
+    - Jika foto menoleh ke samping (profil), menunduk terlalu dalam, mendongak, terpotong (contoh: hanya separuh wajah), terlalu buram, atau terlalu gelap, set 'kualitas_foto_ok' ke false dan berikan 'alasan_kualitas' yang spesifik.
+    - PENTING: Jangan pernah mengubah atau menyarankan perubahan pada identitas wajah, warna kulit, bentuk mata, hidung, atau mulut subjek asli. Fokus hanya pada rambut.
+    PERTAMA, hitung jumlah wajah dalam gambar ('jumlah_wajah').
+    KEDUA, periksa kondisi kepala (Botak/Tertutup/Normal).
+    KETIGA, identifikasi gender utama ('gender': Pria/Wanita).
+    KEEMPAT, berikan 5 rekomendasi gaya rambut tren ${currentYear} yang menyeimbangkan proporsi wajah secara ilmiah.
+    Kembalikan output dalam format JSON murni.`;
+
+    const promptText = `Lakukan "Face Scan & Haircut Analysis" mendalam pada gambar ini. 
+    0. Evaluasi 'kualitas_foto_ok' (Wajib Menghadap Depan). Jika tidak pas, berikan alasan di 'alasan_kualitas'.
+    1. Hitung 'jumlah_wajah'. 
+    2. Tentukan 'status_rambut' (Normal/Botak/Tertutup).
+    3. Jika wajah terdeteksi utuh dan menghadap depan, tentukan 'gender' (Pria/Wanita), bentuk wajah, lebar dahi, jenis rambut, dan struktur tulang wajah. 
+    4. Berikan 5 rekomendasi gaya rambut tren ${currentYear} yang paling cocok secara morfologi.`;
 
     const maiaResponse = await axios.post(
       `${config.baseUrl}/chat/completions`,
@@ -104,13 +132,11 @@ exports.analyzeFace = async (req, res) => {
         model: config.modelName,
         response_format: { type: "json_object" },
         messages: [
+          { role: "system", content: systemInstruction },
           {
             role: "user",
             content: [
-              {
-                type: "text",
-                text: "Analisis morfologi wajah ini. Kembalikan HANYA format JSON.",
-              },
+              { type: "text", text: promptText },
               {
                 type: "image_url",
                 image_url: {
@@ -124,7 +150,6 @@ exports.analyzeFace = async (req, res) => {
       { headers: { Authorization: `Bearer ${decryptedApiKey}` } },
     );
 
-    // Parse hasil analisis
     const hasil_analisis = JSON.parse(
       maiaResponse.data.choices[0].message.content,
     );
@@ -135,20 +160,20 @@ exports.analyzeFace = async (req, res) => {
       total_tokens = 0,
     } = maiaResponse.data.usage || {};
 
-    // Hitung cost USD (hargaInput1M & hargaOutput1M = harga per 1 juta token)
-    const tarifIn = Number(config.hargaInput1M) || 0;
-    const tarifOut = Number(config.hargaOutput1M) || 0;
-    const costUsd =
-      (prompt_tokens / 1_000_000) * tarifIn +
-      (completion_tokens / 1_000_000) * tarifOut;
+    const realCostUsd =
+      (prompt_tokens / 1000000) * tarifIn +
+      (completion_tokens / 1000000) * tarifOut;
+    const realCostIdr = realCostUsd * rateIdr * multiplier;
 
-    // Transaksi atomik: simpan record + potong koin
+    const realKoinAi = Math.ceil(realCostIdr / hargaPerKoinIdr);
+    const totalKoinDipotong = totalKoinFitur + realKoinAi;
+
     const resultTx = await prisma.$transaction(async (tx) => {
       const aiRecord = await tx.aIGeneration.create({
         data: {
           user_id: userId,
-          url_foto_upload,
-          hasil_analisis,
+          url_foto_upload: url_foto_upload,
+          hasil_analisis: hasil_analisis,
           harga_credit_terpakai: totalKoinDipotong,
         },
       });
@@ -158,8 +183,8 @@ exports.analyzeFace = async (req, res) => {
           model_name: config.modelName,
           input_tokens: prompt_tokens,
           output_tokens: completion_tokens,
-          total_tokens,
-          cost_usd: costUsd,
+          total_tokens: total_tokens,
+          cost_usd: realCostUsd,
           user_id: userId,
           ai_generation_id: aiRecord.id,
         },
@@ -173,20 +198,25 @@ exports.analyzeFace = async (req, res) => {
       return aiRecord;
     });
 
-    return res.status(200).json({
+    // Response 
+    res.status(200).json({
       success: true,
-      message: `Analisis berhasil. ${totalKoinDipotong} koin terpotong.`,
+      message: hasil_analisis.kualitas_foto_ok
+        ? `Analisis berhasil. Total ${totalKoinDipotong} koin terpotong.`
+        : `Kualitas foto tidak memenuhi syarat: ${hasil_analisis.alasan_kualitas}`,
       data: resultTx,
       usage_info: {
         tokens: total_tokens,
-        cost_usd: costUsd.toFixed(6),
+        cost_usd: realCostUsd,
+        service_fee: totalKoinFitur,
+        token_fee: realKoinAi,
       },
     });
   } catch (error) {
     console.error("AI Error:", error.message);
-    return res.status(500).json({
+    res.status(500).json({
       success: false,
-      message: "Gagal memproses AI.",
+      message: "Gagal memproses analisis AI.",
       error: error.message,
     });
   }
