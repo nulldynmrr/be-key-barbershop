@@ -78,7 +78,7 @@ router.post("/admin/login", authController.adminLogin);
 
 /**
  * @swagger
- * /auth/register:
+ * /v1/auth/register:
  *   post:
  *     summary: Registrasi Admin Baru (Internal Use Only)
  *     tags: [Auth]
