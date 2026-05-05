@@ -10,7 +10,6 @@ exports.getAdminAlerts = async (req, res) => {
   try {
     const alerts = [];
 
-    // Ambil semua model AI yang aktif dan punya maxBudget
     const aiModels = await prisma.aiModel.findMany({
       where: {
         isActive: true,
