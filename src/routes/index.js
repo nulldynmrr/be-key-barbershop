@@ -16,6 +16,7 @@ const adminBillingRoutes = r(require("./adminBilling.routes"));
 const adminRoutes = r(require("./admin.routes"));
 const userRoutes = r(require("./user.routes"));
 const packageRoutes = r(require("./package.routes"));
+const notificationRoutes = r(require("./notification.route"));
 
 router.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 router.use("/auth", authRoutes);
@@ -29,5 +30,6 @@ router.use("/admin-billing", adminBillingRoutes);
 router.use("/admin", adminRoutes);
 router.use("/users", userRoutes);
 router.use("/packages", packageRoutes);
+router.use("/notifications", notificationRoutes);
 
 module.exports = router;
