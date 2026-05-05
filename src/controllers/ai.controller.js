@@ -37,8 +37,8 @@ exports.analyzeFace = async (req, res) => {
     res.status(200).json({
       success: true,
       message: result.kualitas_ok
-        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong.`
-        : `Kualitas foto kurang: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong (Service: ${result.totalKoinFitur}, AI: ${result.realKoinAi}).`,
+        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}).`
+        : `Kualitas foto kurang baik: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong.`,
       data: result.resultTx,
       usage_info: {
         tokens: result.total_tokens,
