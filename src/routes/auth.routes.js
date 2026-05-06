@@ -180,4 +180,56 @@ router.post("/user/register", authController.userRegister);
  */
 router.post("/forgot-password", authController.forgotPassword);
 
+/**
+ * @swagger
+ * /v1/auth/request-otp:
+ *   post:
+ *     summary: Meminta kode OTP via Email
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: "email.kamu@gmail.com"
+ *     responses:
+ *       200:
+ *         description: OTP berhasil dikirim
+ */
+router.post("/request-otp", authController.requestOTP);
+
+/**
+ * @swagger
+ * /v1/auth/verify-otp:
+ *   post:
+ *     summary: Verifikasi OTP dan Login
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: "email.kamu@gmail.com"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Verifikasi sukses dan mendapatkan token
+ */
+router.post("/verify-otp", authController.verifyOTP);
+
 module.exports = router;
