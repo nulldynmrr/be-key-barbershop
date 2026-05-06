@@ -5,6 +5,7 @@ const { OAuth2Client } = require("google-auth-library");
 const { userRegisterSchema } = require("../validations/auth.validation");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const path = require("path");
 
 const prisma = new PrismaClient();
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -62,59 +63,136 @@ exports.googleLogin = async (req, res) => {
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
+  port: parseInt(process.env.SMTP_PORT || "587"),
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false,
   },
 });
 
 exports.requestOTP = async (req, res) => {
   const { email } = req.body;
 
+  if (!email) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Email wajib diisi" });
+  }
+
   const otp = crypto.randomInt(100000, 999999).toString();
   const expires = new Date(Date.now() + 5 * 60 * 1000);
 
   try {
-    await prisma.user.update({
+    const user = await prisma.user.upsert({
       where: { email },
-      data: { otp, otpExpires: expires },
+      update: { otp, otpExpires: expires },
+      create: {
+        email,
+        nama: "Pelanggan Key Barber",
+        role: "user",
+        tipe_akun: "free",
+        sisa_credit: 3,
+        otp,
+        otpExpires: expires,
+      },
     });
 
     await transporter.sendMail({
-      from: '"Key Barber Support" <no-reply@keybarber.com>',
+      from: '"Key Barber" <keybarber.mitra@gmail.com>',
       to: email,
-      subject: "Kode OTP Verifikasi Kamu",
-      html: `<b>${otp}</b> adalah kode verifikasi kamu. Berlaku selama 5 menit.`,
-    });
+      subject: "Kode Verifikasi Key Barber Kamu",
+      html: `
+        <div style="background-color: #f4f4f4; padding: 40px 0; font-family: sans-serif;">
+          <div style="max-width: 400px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
+            
+            <div style="background-color: #ffffff; padding: 40px 30px 10px 30px; text-align: center;">
+              <img src="cid:logo_keybarber" width="120" alt="Key Barber" style="display: block; margin: 0 auto;">
+            </div>
 
+            <div style="padding: 10px 30px 40px 30px; text-align: center;">
+              <h2 style="color: #1a1a1a; font-size: 20px; margin-bottom: 8px; font-weight: 700;">Konfirmasi Verifikasi</h2>
+              <p style="color: #777; font-size: 14px; line-height: 1.5; margin-bottom: 25px;">Masukkan kode keamanan berikut untuk mengakses akun Anda.</p>
+              
+              <div style="background-color: #fdfdfd; border: 1px solid #eeeeee; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
+                <span style="font-size: 32px; font-weight: 800; letter-spacing: 10px; color: #1a1a1a; font-family: monospace;">${otp}</span>
+              </div>
+
+              <div style="display: inline-block; background-color: #fff5f5; border: 1px solid #feb2b2; padding: 6px 15px; border-radius: 20px;">
+                <span style="color: #c53030; font-size: 12px; font-weight: 600; text-transform: uppercase;">Berlaku 5 Menit</span>
+              </div>
+              
+              <p style="color: #999; font-size: 12px; margin-top: 25px; line-height: 1.6;">
+                Harap jangan membagikan kode ini kepada siapa pun.<br>
+                Jika Anda tidak meminta kode ini, abaikan email ini.
+              </p>
+            </div>
+
+            <div style="background-color: #fafafa; padding: 20px; text-align: center; border-top: 1px solid #f1f1f1;">
+              <p style="color: #bbb; font-size: 10px; margin: 0; text-transform: uppercase; letter-spacing: 1px;">Key Barber Platform 2026</p>
+            </div>
+          </div>
+        </div>
+      `,
+      attachments: [
+        {
+          filename: "logo key barber.png",
+          path: path.join(__dirname, "../assets/logo key barber.png"),
+          cid: "logo_keybarber",
+        },
+      ],
+    });
     res.status(200).json({ success: true, message: "OTP terkirim ke email!" });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Gagal mengirim OTP",
+      error: error.message,
+    });
   }
 };
 
 exports.verifyOTP = async (req, res) => {
   const { email, otp } = req.body;
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
 
-  if (!user || user.otp !== otp) {
-    return res.status(400).json({ success: false, message: "Kode OTP salah!" });
+    if (!user || String(user.otp) !== String(otp)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Kode OTP salah!" });
+    }
+
+    if (new Date() > user.otpExpires) {
+      return res
+        .status(400)
+        .json({ success: false, message: "OTP sudah kadaluarsa!" });
+    }
+
+    await prisma.user.update({
+      where: { email },
+      data: { otp: null, otpExpires: null },
+    });
+
+    const token = generateToken(user);
+
+    res.status(200).json({
+      success: true,
+      message: "Verifikasi Berhasil!",
+      token,
+      data: {
+        id: user.id,
+        nama: user.nama,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
-
-  if (new Date() > user.otpExpires) {
-    return res
-      .status(400)
-      .json({ success: false, message: "OTP sudah kadaluarsa!" });
-  }
-
-  await prisma.user.update({
-    where: { email },
-    data: { otp: null, otpExpires: null },
-  });
-
-  res.status(200).json({ success: true, message: "Verifikasi Berhasil!" });
 };
 
 exports.guestLogin = async (req, res) => {
@@ -256,7 +334,6 @@ exports.userRegister = async (req, res) => {
       data: { id: newUser.id, nama: newUser.nama, email: newUser.email },
     });
   } catch (error) {
-    console.error("userRegister error:", error.message);
     return res.status(500).json({
       success: false,
       message: "Terjadi kesalahan server.",

@@ -79,7 +79,7 @@ router.delete("/users/:id", deleteUser);
 
 /**
  * @swagger
- * /admin/users/{id}/credit:
+ * /v1/admin/users/{id}/credit:
  *   patch:
  *     summary: Tambah/Kurangi credit user secara manual
  *     tags: [Admin Management]

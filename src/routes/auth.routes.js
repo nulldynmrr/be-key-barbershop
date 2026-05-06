@@ -183,52 +183,58 @@ router.post("/forgot-password", authController.forgotPassword);
 /**
  * @swagger
  * /v1/auth/request-otp:
- *   post:
- *     summary: Meminta kode OTP via Email
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *             properties:
- *               email:
- *                 type: string
- *                 example: "email.kamu@gmail.com"
- *     responses:
- *       200:
- *         description: OTP berhasil dikirim
+ *   post:
+ *     summary: Meminta kode OTP via Email
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: "user@gmail.com"
+ *     responses:
+ *       200:
+ *         description: OTP berhasil dikirim
+ *       400:
+ *         description: Email wajib diisi
+ *       500:
+ *         description: Gagal mengirim email
  */
 router.post("/request-otp", authController.requestOTP);
 
 /**
  * @swagger
  * /v1/auth/verify-otp:
- *   post:
- *     summary: Verifikasi OTP dan Login
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - otp
- *             properties:
- *               email:
- *                 type: string
- *                 example: "email.kamu@gmail.com"
- *               otp:
- *                 type: string
- *                 example: "123456"
- *     responses:
- *       200:
- *         description: Verifikasi sukses dan mendapatkan token
+ *   post:
+ *     summary: Verifikasi OTP dan Login
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: "user@gmail.com"
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Verifikasi sukses dan mendapatkan token
+ *       400:
+ *         description: Kode OTP salah atau kadaluarsa
  */
 router.post("/verify-otp", authController.verifyOTP);
 
