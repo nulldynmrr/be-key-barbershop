@@ -39,7 +39,7 @@ Manajemen sumber daya API yang efisien untuk menjaga profitabilitas operasional:
 | **Database ORM** | Prisma ORM |
 | **Primary Database** | MySQL |
 | **Security** | JWT, Bcrypt, Helmet, CORS |
-| **AI Processing** | Google Generative AI / Groq API |
+| **AI Processing** | Google Generative AI |
 | **Observability** | Telegram API & Winston Logging |
 | **Documentation** | OpenAPI 3.0 (Swagger) |
 
