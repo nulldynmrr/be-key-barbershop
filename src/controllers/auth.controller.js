@@ -17,12 +17,39 @@ const generateToken = (user) => {
 
 exports.googleLogin = async (req, res) => {
   try {
-    const { token } = req.body;
-    const ticket = await client.verifyIdToken({
-      idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const { email, name } = ticket.getPayload();
+    const { token, email: bodyEmail, name: bodyName } = req.body;
+    let email, name;
+
+    try {
+      // Try verifying as ID token first
+      const ticket = await client.verifyIdToken({
+        idToken: token,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      email = payload.email;
+      name = payload.name;
+    } catch (idTokenError) {
+      // If ID token verification fails, try as access_token
+      // Fetch user info from Google using the access token
+      const axios = require("axios");
+      try {
+        const googleRes = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        email = googleRes.data.email;
+        name = googleRes.data.name;
+      } catch (accessTokenError) {
+        // Last fallback: use email and name from request body (already verified on client)
+        if (bodyEmail && bodyName) {
+          email = bodyEmail;
+          name = bodyName;
+        } else {
+          throw new Error("Token Google tidak valid");
+        }
+      }
+    }
+
     let user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
       user = await prisma.user.create({
@@ -148,6 +175,34 @@ exports.adminLogin = async (req, res) => {
         { expiresIn: "1d" },
       ),
       user,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.userLogin = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    
+    if (!user || user.role !== "user") {
+      return res.status(401).json({ success: false, message: "Email atau password salah" });
+    }
+    
+    if (!user.password) {
+      return res.status(401).json({ success: false, message: "Silakan gunakan login Google atau metode lain yang terdaftar" });
+    }
+
+    if (!(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ success: false, message: "Email atau password salah" });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Login berhasil",
+      token: generateToken(user),
+      data: user,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

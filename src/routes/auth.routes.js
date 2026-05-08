@@ -141,6 +141,36 @@ router.post("/user/register", authController.userRegister);
 
 /**
  * @swagger
+ * /v1/auth/user/login:
+ *   post:
+ *     summary: Login khusus user (pelanggan)
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Login user berhasil
+ *       401:
+ *         description: Kredensial salah
+ *       403:
+ *         description: Bukan user
+ */
+router.post("/user/login", authController.userLogin);
+
+/**
+ * @swagger
  * /v1/auth/forgot-password:
  *   post:
  *     summary: Permintaan reset password (Lupa Password)
