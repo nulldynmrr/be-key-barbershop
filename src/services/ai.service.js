@@ -1,43 +1,54 @@
 const axios = require("axios");
+const sharp = require("sharp");
 const { PrismaClient } = require("@prisma/client");
 const { decrypt } = require("../utils/encryption");
 const cache = require("../utils/memoryCache");
 
 const prisma = new PrismaClient();
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // Limit 5MB untuk mencegah Memory Leak
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+// Map featureCode (dari request) ke kolom boolean di tabel SubscriptionPackage
+const FEATURE_GATE_MAP = {
+  STANDARD_SCAN:  "featStandardScan",
+  SYMMETRY:       "featSymmetry",
+  ADV_MAPPING:    "featAdvMapping",
+  VIRTUAL_TRY_ON: "featVirtualTryOn",
+  HISTORY:        "featHistory",
+  TREND_ANALYSIS: "featTrendAnalysis",
+};
 
 exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
-  // PROTEKSI MEMORY LEAK
+  // Auto-compress file > 5MB ke WebP secara iteratif, tidak memblokir user
   if (file.size > MAX_FILE_SIZE) {
-    const err = new Error(
-      "Payload Terlalu Besar: Maksimal ukuran gambar adalah 5MB.",
-    );
-    err.statusCode = 413;
-    throw err;
+    let quality = 80;
+    let compressedBuffer = await sharp(file.buffer).webp({ quality }).toBuffer();
+
+    while (compressedBuffer.length > MAX_FILE_SIZE && quality > 20) {
+      quality -= 10;
+      compressedBuffer = await sharp(file.buffer).webp({ quality }).toBuffer();
+    }
+
+    file.buffer = compressedBuffer;
+    file.size = compressedBuffer.length;
+    file.mimetype = "image/webp";
+    file.originalname = file.originalname.replace(/\.[^.]+$/, ".webp");
   }
 
-  // [CACHING] Ambil Config Sistem & Pricing
-  let sysConfig = cache.get("sysConfig");
-  let pricingList = cache.get("pricingList");
-  let configAi = cache.get("configAi");
-  let subPack = cache.get("subPack");
+  // Fetch user + paket aktif + config sistem secara paralel; gunakan cache bila tersedia
+  const [user, sysConfigFromDb, pricingListFromDb, configAiFromDb] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, include: { active_package: true } }),
+    cache.get("sysConfig")   ? null : prisma.systemConfig.findFirst(),
+    cache.get("pricingList") ? null : prisma.featurePricing.findMany({ where: { isActive: true } }),
+    cache.get("configAi")    ? null : prisma.aiModel.findFirst({ where: { isActive: true } }),
+  ]);
 
-  if (!sysConfig || !pricingList || !configAi || !subPack) {
-    [sysConfig, pricingList, configAi, subPack] = await Promise.all([
-      prisma.systemConfig.findFirst(),
-      prisma.featurePricing.findMany({ where: { isActive: true } }),
-      prisma.aiModel.findFirst({ where: { isActive: true } }),
-      prisma.subscriptionPackage.findFirst({
-        where: { status: "AKTIF" },
-        orderBy: { hargaNominal: "asc" },
-      }),
-    ]);
+  const sysConfig   = cache.get("sysConfig")   || sysConfigFromDb;
+  const pricingList = cache.get("pricingList") || pricingListFromDb;
+  const configAi    = cache.get("configAi")    || configAiFromDb;
 
-    cache.set("sysConfig", sysConfig, 300);
-    cache.set("pricingList", pricingList, 300);
-    cache.set("configAi", configAi, 300);
-    cache.set("subPack", subPack, 300);
-  }
+  if (sysConfigFromDb)   cache.set("sysConfig",   sysConfig,   300);
+  if (pricingListFromDb) cache.set("pricingList", pricingList, 300);
+  if (configAiFromDb)    cache.set("configAi",    configAi,    300);
 
   if (!configAi) {
     const err = new Error("Konfigurasi AI belum diatur Admin.");
@@ -45,69 +56,87 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     throw err;
   }
 
-  // Kalkulasi Biaya Fitur
-  let totalKoinFitur = 0;
+  // Feature Gating: validasi paket aktif user sebelum request diteruskan ke AI
+  if (!user || !user.active_package) {
+    const err = new Error("Anda belum memiliki paket aktif. Silakan beli paket terlebih dahulu.");
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const userPackage = user.active_package;
+
   for (const feature of requestedFeatures) {
-    const dbFeature = pricingList.find((p) => p.featureCode === feature);
-    if (!dbFeature) {
-      const err = new Error(
-        `Fitur '${feature}' tidak dikenali atau dinonaktifkan.`,
-      );
+    const col = FEATURE_GATE_MAP[feature.toUpperCase()];
+    if (!col) {
+      const err = new Error(`Fitur '${feature}' tidak dikenal.`);
       err.statusCode = 400;
       throw err;
     }
-    totalKoinFitur += dbFeature.koinCost;
+    if (!userPackage[col]) {
+      const err = new Error(
+        `Akses Ditolak: Fitur '${feature}' tidak termasuk dalam paket '${userPackage.namaPaket}' Anda.`
+      );
+      err.statusCode = 403;
+      throw err;
+    }
+  }
+
+  // Hitung total koin dari tabel FeaturePricing berdasarkan fitur yang diminta
+  let totalKoinFitur = 0;
+  for (const feature of requestedFeatures) {
+    const dbFeature = pricingList.find((p) => p.featureCode === feature.toUpperCase());
+    if (dbFeature) totalKoinFitur += dbFeature.koinCost;
   }
 
   const rateIdr = sysConfig?.baseRateUsdIdr || 16000;
   const multiplier = sysConfig?.globalMultiplier || 1.35;
-  const hargaPerKoinIdr =
-    subPack && subPack.jumlahKoin > 0
-      ? subPack.hargaNominal / subPack.jumlahKoin
-      : 250;
 
-  // [PRE-CHECK] ESTIMASI
-  const tarifIn = Number(configAi.hargaInput1M) || 0;
-  const tarifOut = Number(configAi.hargaOutput1M) || 0;
+  // Harga per koin dihitung dari nilai paket aktif user (bukan paket global termurah)
+  const hargaPerKoinIdr = userPackage.jumlahKoin > 0
+    ? userPackage.hargaNominal / userPackage.jumlahKoin
+    : 250;
+
+  const tarifIn   = Number(configAi.hargaInput1M)  || 0;
+  const tarifOut  = Number(configAi.hargaOutput1M) || 0;
   const avgTokens = configAi.avgTokensPerUse || 2000;
   const estCostUsd = (avgTokens / 1000000) * ((tarifIn + tarifOut) / 2);
   const estCostIdr = estCostUsd * rateIdr * multiplier;
-  const estKoinAi = Math.ceil(estCostIdr / hargaPerKoinIdr);
+  const estKoinAi  = Math.ceil(estCostIdr / hargaPerKoinIdr);
   const minKoinRequired = totalKoinFitur + estKoinAi;
 
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || user.sisa_credit < minKoinRequired) {
+  if (user.sisa_credit < minKoinRequired) {
     const err = new Error(
-      `Credit tidak mencukupi. Estimasi butuh ${minKoinRequired} koin (Fitur: ${totalKoinFitur}, Token AI: ${estKoinAi}). Sisa koin Anda: ${user?.sisa_credit || 0}.`,
+      `Credit tidak mencukupi. Estimasi butuh ${minKoinRequired} koin (Fitur: ${totalKoinFitur}, Token AI: ${estKoinAi}). Sisa: ${user.sisa_credit}.`
     );
     err.statusCode = 402;
     throw err;
   }
 
-  // INSTRUKSI DINAMIS & EKSEKUSI API
+  // Prompt builder: instruksi AI berbeda berdasarkan keaktifan fitur TREND_ANALYSIS
   const currentYear = new Date().getFullYear();
   const decryptedApiKey = decrypt(configAi.apiKey);
   const imageBase64 = file.buffer.toString("base64");
   const url_foto_upload = `/uploads/ai_results/${Date.now()}-${file.originalname.replace(/\s+/g, "-")}`;
 
-  const systemInstruction = `Kamu adalah AI Master Stylist & Konsultan Morfologi Wajah tahun ${currentYear}. Tugas mutlakmu: Lakukan analisis MURNI dan KLINIS. 
-  LANGKAH 0 (KUALITAS & ORIENTASI FOTO): 
-  - Evaluasi apakah wajah MENGHADAP DEPAN secara utuh (Frontal View).
-  - Jika foto menoleh ke samping (profil), menunduk terlalu dalam, mendongak, terpotong, terlalu buram, atau terlalu gelap, set 'kualitas_foto_ok' ke false dan berikan 'alasan_kualitas' yang spesifik.
-  - PENTING: Jangan pernah mengubah atau menyarankan perubahan pada identitas wajah, warna kulit, bentuk mata, hidung, atau mulut subjek asli. Fokus hanya pada rambut.
-  PERTAMA, hitung jumlah wajah dalam gambar ('jumlah_wajah').
-  KEDUA, periksa kondisi kepala (Botak/Tertutup/Normal).
-  KETIGA, identifikasi gender utama ('gender': Pria/Wanita).
-  KEEMPAT, berikan 5 rekomendasi gaya rambut tren ${currentYear} yang menyeimbangkan proporsi wajah secara ilmiah.
-  Kembalikan output dalam format JSON murni.`;
+  const isTrendActive = requestedFeatures.some(f => f.toUpperCase() === "TREND_ANALYSIS");
 
-  const promptText = `Lakukan "Face Scan & Haircut Analysis" mendalam pada gambar ini. 
-  0. Evaluasi 'kualitas_foto_ok' (Wajib Menghadap Depan). Jika tidak pas, berikan alasan di 'alasan_kualitas'.
-  1. Hitung 'jumlah_wajah'. 
-  2. Tentukan 'status_rambut' (Normal/Botak/Tertutup).
-  3. Jika wajah terdeteksi utuh dan menghadap depan, tentukan 'gender' (Pria/Wanita), bentuk wajah, lebar dahi, jenis rambut, dan struktur tulang wajah. 
-  4. Berikan 5 rekomendasi gaya rambut tren ${currentYear} yang paling cocok secara morfologi.`;
+  const trendInstruction = isTrendActive
+    ? `FITUR PREMIUM AKTIF: Berikan 5 rekomendasi gaya rambut PALING TREN tahun ${currentYear}, MATCH dengan bentuk wajah terdeteksi.`
+    : `Berikan 5 rekomendasi gaya rambut yang sesuai proporsi wajah. Rentang tren: ${currentYear - 5}–${currentYear}.`;
 
+  const systemInstruction = `Kamu adalah AI Master Stylist & Konsultan Morfologi Wajah tahun ${currentYear}. Lakukan analisis MURNI dan KLINIS.
+  LANGKAH 0: Evaluasi apakah wajah MENGHADAP DEPAN. Jika tidak, set 'kualitas_foto_ok' = false dan isi 'alasan_kualitas'.
+  PENTING: Jangan ubah identitas wajah. Fokus hanya pada rambut.
+  1. Hitung 'jumlah_wajah'. 2. Periksa 'status_rambut' (Botak/Tertutup/Normal). 3. Identifikasi 'gender'.
+  4. ${trendInstruction}
+  Output: format JSON murni.`;
+
+  const promptText = `Lakukan "Face Scan & Haircut Analysis" pada gambar ini.
+  0. Evaluasi 'kualitas_foto_ok'. Jika tidak pas, isi 'alasan_kualitas'.
+  1. Hitung 'jumlah_wajah'. 2. 'status_rambut'. 3. 'gender', bentuk wajah, lebar dahi, jenis rambut, struktur tulang.
+  4. ${trendInstruction}`;
+
+  // Kirim request ke API AI provider
   const maiaResponse = await axios.post(
     `${configAi.baseUrl}/chat/completions`,
     {
@@ -119,42 +148,27 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
           role: "user",
           content: [
             { type: "text", text: promptText },
-            {
-              type: "image_url",
-              image_url: { url: `data:${file.mimetype};base64,${imageBase64}` },
-            },
+            { type: "image_url", image_url: { url: `data:${file.mimetype};base64,${imageBase64}` } },
           ],
         },
       ],
     },
-    { headers: { Authorization: `Bearer ${decryptedApiKey}` } },
+    { headers: { Authorization: `Bearer ${decryptedApiKey}` } }
   );
 
-  const hasil_analisis = JSON.parse(
-    maiaResponse.data.choices[0].message.content,
-  );
+  const hasil_analisis = JSON.parse(maiaResponse.data.choices[0].message.content);
 
-  // POST-CHECK & DATABASE TRANSACTION
-  const {
-    prompt_tokens = 0,
-    completion_tokens = 0,
-    total_tokens = 0,
-  } = maiaResponse.data.usage || {};
-  const realCostUsd =
-    (prompt_tokens / 1000000) * tarifIn +
-    (completion_tokens / 1000000) * tarifOut;
-  const realCostIdr = realCostUsd * rateIdr * multiplier;
-  const realKoinAi = Math.ceil(realCostIdr / hargaPerKoinIdr);
+  // Hitung biaya token nyata (post-call) dan simpan ke DB dalam satu transaksi atomik
+  const { prompt_tokens = 0, completion_tokens = 0, total_tokens = 0 } = maiaResponse.data.usage || {};
+
+  const realCostUsd   = (prompt_tokens / 1000000) * tarifIn + (completion_tokens / 1000000) * tarifOut;
+  const realCostIdr   = realCostUsd * rateIdr * multiplier;
+  const realKoinAi    = Math.ceil(realCostIdr / hargaPerKoinIdr);
   const totalDipotong = totalKoinFitur + realKoinAi;
 
   const resultTx = await prisma.$transaction(async (tx) => {
     const aiRecord = await tx.aIGeneration.create({
-      data: {
-        user_id: userId,
-        url_foto_upload: url_foto_upload,
-        hasil_analisis: hasil_analisis,
-        harga_credit_terpakai: totalDipotong,
-      },
+      data: { user_id: userId, url_foto_upload, hasil_analisis, harga_credit_terpakai: totalDipotong },
     });
 
     await tx.systemApiLog.create({
@@ -162,7 +176,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
         model_name: configAi.modelName,
         input_tokens: prompt_tokens,
         output_tokens: completion_tokens,
-        total_tokens: total_tokens,
+        total_tokens,
         cost_usd: realCostUsd,
         user_id: userId,
         ai_generation_id: aiRecord.id,

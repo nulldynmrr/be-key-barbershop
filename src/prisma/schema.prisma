@@ -37,6 +37,9 @@ model User {
   ai_generations         AIGeneration[]
   system_api_logs        SystemApiLog[]
   feedbacks              Feedback[]
+
+  active_package_id      String?
+  active_package         SubscriptionPackage? @relation(fields: [active_package_id], references: [id])
 }
 
 model Transaction {
@@ -174,8 +177,9 @@ model SubscriptionPackage {
   featStandardScan Boolean @default(true)
   featSymmetry     Boolean @default(false)
   featAdvMapping   Boolean @default(false)
-  featVirtualTryOn Boolean @default(false)
-  featHistory      Boolean @default(false)
+  featVirtualTryOn  Boolean @default(false)
+  featHistory       Boolean @default(false)
+  featTrendAnalysis Boolean @default(false)
 
   typeValue    String // 'ONTIME' | 'SUBSCRIPTION'
   durationDays Int?
@@ -189,6 +193,8 @@ model SubscriptionPackage {
   diskonAkhir DateTime?
 
   status String @default("AKTIF")
+
+  users User[]
 }
 
 model FeaturePricing {

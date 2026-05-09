@@ -31,6 +31,9 @@ const router = Router();
  *               featVirtualTryOn:
  *                 type: boolean
  *                 example: false
+ *               featHistory:
+ *                 type: boolean
+ *                 example: true
  *     responses:
  *       200:
  *         description: Berhasil menghitung estimasi HPP

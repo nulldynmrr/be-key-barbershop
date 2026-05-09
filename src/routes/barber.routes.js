@@ -15,7 +15,7 @@ const optimizeImage = require("../middleware/imageOptimizer.middleware");
 
 /**
  * @swagger
- * /barbers:
+ * /v1/barbers:
  *   get:
  *     summary: Ambil semua daftar barber
  *     tags: [Barbers]
@@ -59,7 +59,7 @@ router.post(
 
 /**
  * @swagger
- * /barbers/{id}:
+ * /v1/barbers/{id}:
  *   put:
  *     summary: Edit data kapster/barber (Admin Only)
  *     tags: [Barbers]
