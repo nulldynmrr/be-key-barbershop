@@ -7,18 +7,16 @@ const cache = require("../utils/memoryCache");
 const prisma = new PrismaClient();
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
-// Map featureCode (dari request) ke kolom boolean di tabel SubscriptionPackage
 const FEATURE_GATE_MAP = {
-  STANDARD_SCAN:  "featStandardScan",
-  SYMMETRY:       "featSymmetry",
-  ADV_MAPPING:    "featAdvMapping",
+  STANDARD_SCAN: "featStandardScan",
+  SYMMETRY: "featSymmetry",
+  ADV_MAPPING: "featAdvMapping",
   VIRTUAL_TRY_ON: "featVirtualTryOn",
-  HISTORY:        "featHistory",
+  HISTORY: "featHistory",
   TREND_ANALYSIS: "featTrendAnalysis",
 };
 
 exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
-  // Auto-compress file > 5MB ke WebP secara iteratif, tidak memblokir user
   if (file.size > MAX_FILE_SIZE) {
     let quality = 80;
     let compressedBuffer = await sharp(file.buffer).webp({ quality }).toBuffer();
@@ -34,21 +32,20 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     file.originalname = file.originalname.replace(/\.[^.]+$/, ".webp");
   }
 
-  // Fetch user + paket aktif + config sistem secara paralel; gunakan cache bila tersedia
   const [user, sysConfigFromDb, pricingListFromDb, configAiFromDb] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId }, include: { active_package: true } }),
-    cache.get("sysConfig")   ? null : prisma.systemConfig.findFirst(),
+    cache.get("sysConfig") ? null : prisma.systemConfig.findFirst(),
     cache.get("pricingList") ? null : prisma.featurePricing.findMany({ where: { isActive: true } }),
-    cache.get("configAi")    ? null : prisma.aiModel.findFirst({ where: { isActive: true } }),
+    cache.get("configAi") ? null : prisma.aiModel.findFirst({ where: { isActive: true } }),
   ]);
 
-  const sysConfig   = cache.get("sysConfig")   || sysConfigFromDb;
+  const sysConfig = cache.get("sysConfig") || sysConfigFromDb;
   const pricingList = cache.get("pricingList") || pricingListFromDb;
-  const configAi    = cache.get("configAi")    || configAiFromDb;
+  const configAi = cache.get("configAi") || configAiFromDb;
 
-  if (sysConfigFromDb)   cache.set("sysConfig",   sysConfig,   300);
+  if (sysConfigFromDb) cache.set("sysConfig", sysConfig, 300);
   if (pricingListFromDb) cache.set("pricingList", pricingList, 300);
-  if (configAiFromDb)    cache.set("configAi",    configAi,    300);
+  if (configAiFromDb) cache.set("configAi", configAi, 300);
 
   if (!configAi) {
     const err = new Error("Konfigurasi AI belum diatur Admin.");
@@ -56,7 +53,6 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     throw err;
   }
 
-  // Feature Gating: validasi paket aktif user sebelum request diteruskan ke AI
   if (!user || !user.active_package) {
     const err = new Error("Anda belum memiliki paket aktif. Silakan beli paket terlebih dahulu.");
     err.statusCode = 403;
@@ -81,7 +77,6 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     }
   }
 
-  // Hitung total koin dari tabel FeaturePricing berdasarkan fitur yang diminta
   let totalKoinFitur = 0;
   for (const feature of requestedFeatures) {
     const dbFeature = pricingList.find((p) => p.featureCode === feature.toUpperCase());
@@ -91,13 +86,12 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   const rateIdr = sysConfig?.baseRateUsdIdr || 16000;
   const multiplier = sysConfig?.globalMultiplier || 1.35;
 
-  // Harga per koin dihitung dari nilai paket aktif user (bukan paket global termurah)
   const hargaPerKoinIdr = userPackage.jumlahKoin > 0
     ? userPackage.hargaNominal / userPackage.jumlahKoin
     : 250;
 
-  const tarifIn   = Number(configAi.hargaInput1M)  || 0;
-  const tarifOut  = Number(configAi.hargaOutput1M) || 0;
+  const tarifIn = Number(configAi.hargaInput1M) || 0;
+  const tarifOut = Number(configAi.hargaOutput1M) || 0;
   const avgTokens = configAi.avgTokensPerUse || 2000;
 
   // IMAGE_GEN: input per /1M token + output flat per /image
@@ -107,7 +101,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     : (avgTokens / 1_000_000) * ((tarifIn + tarifOut) / 2);
 
   const estCostIdr = estCostUsd * rateIdr * multiplier;
-  const estKoinAi  = Math.ceil(estCostIdr / hargaPerKoinIdr);
+  const estKoinAi = Math.ceil(estCostIdr / hargaPerKoinIdr);
   const minKoinRequired = totalKoinFitur + estKoinAi;
 
   if (user.sisa_credit < minKoinRequired) {
@@ -118,7 +112,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     throw err;
   }
 
-  // Prompt builder: instruksi AI berbeda berdasarkan keaktifan fitur TREND_ANALYSIS
+  //[INTRUKSI]
   const currentYear = new Date().getFullYear();
   const decryptedApiKey = decrypt(configAi.apiKey);
   const imageBase64 = file.buffer.toString("base64");
@@ -142,7 +136,6 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   1. Hitung 'jumlah_wajah'. 2. 'status_rambut'. 3. 'gender', bentuk wajah, lebar dahi, jenis rambut, struktur tulang.
   4. ${trendInstruction}`;
 
-  // Kirim request ke API AI provider
   const maiaResponse = await axios.post(
     `${configAi.baseUrl}/chat/completions`,
     {
@@ -164,16 +157,14 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
 
   const hasil_analisis = JSON.parse(maiaResponse.data.choices[0].message.content);
 
-  // Hitung biaya token nyata (post-call) dan simpan ke DB dalam satu transaksi atomik
   const { prompt_tokens = 0, completion_tokens = 0, total_tokens = 0 } = maiaResponse.data.usage || {};
 
-  // IMAGE_GEN: biaya input token nyata + flat per image
-  // LLM: biaya input + output token nyata
+
   const realCostUsd = configAi.pricingUnit === "IMAGE"
     ? (prompt_tokens / 1_000_000) * tarifIn + (Number(configAi.hargaPerImage) || 0)
     : (prompt_tokens / 1_000_000) * tarifIn + (completion_tokens / 1_000_000) * tarifOut;
-  const realCostIdr   = realCostUsd * rateIdr * multiplier;
-  const realKoinAi    = Math.ceil(realCostIdr / hargaPerKoinIdr);
+  const realCostIdr = realCostUsd * rateIdr * multiplier;
+  const realKoinAi = Math.ceil(realCostIdr / hargaPerKoinIdr);
   const totalDipotong = totalKoinFitur + realKoinAi;
 
   const resultTx = await prisma.$transaction(async (tx) => {
