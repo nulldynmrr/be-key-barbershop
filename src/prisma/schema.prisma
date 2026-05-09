@@ -113,18 +113,23 @@ model AdminTokenPurchase {
 }
 
 model AiModel {
-  id              String @id @default(uuid())
+  id              String  @id @default(uuid())
   namaRouter      String
   baseUrl         String
   modelName       String
-  apiKey          String // Harus dienkripsi di DB!
-  typeAi          String // 'LLM' | 'IMAGE_GEN'
-  hargaInput1M    Float
-  hargaOutput1M   Float
+  apiKey          String
+  typeAi          String  // 'LLM' | 'IMAGE_GEN'
+  pricingUnit     String  @default("TOKEN") // 'TOKEN' | 'IMAGE'
+  hargaInput1M    Float   @default(0)
+  hargaOutput1M   Float   @default(0)
+  hargaPerImage   Float   @default(0)
   maxBudget       Float
   rpmLimit        Int
-  avgTokensPerUse Int    @default(2000) // Estimasi token per 1x aksi
-  isActive        Boolean  @default(true)
+  avgTokensPerUse Int     @default(2000)
+  isActive        Boolean @default(true)
+
+  packagesAsLlm   SubscriptionPackage[] @relation("LlmModel")
+  packagesAsImage SubscriptionPackage[] @relation("ImageModel")
 }
 
 model Feedback {
@@ -173,18 +178,23 @@ model SubscriptionPackage {
   jumlahKoin Int
   deskripsi  String
 
-  // Toggles (JSON atau Boolean)
-  featStandardScan Boolean @default(true)
-  featSymmetry     Boolean @default(false)
-  featAdvMapping   Boolean @default(false)
+  featStandardScan  Boolean @default(true)
+  featSymmetry      Boolean @default(false)
+  featAdvMapping    Boolean @default(false)
   featVirtualTryOn  Boolean @default(false)
   featHistory       Boolean @default(false)
   featTrendAnalysis Boolean @default(false)
 
-  typeValue    String // 'ONTIME' | 'SUBSCRIPTION'
+  // Model AI yang dipilih Admin saat membuat paket
+  llmModelId    String?
+  imageModelId  String?
+  llmModel      AiModel? @relation("LlmModel",   fields: [llmModelId],   references: [id])
+  imageModel    AiModel? @relation("ImageModel", fields: [imageModelId], references: [id])
+
+  typeValue    String
   durationDays Int?
 
-  hppIdeal     Float // Hasil kalkulasi backend
+  hppIdeal     Float
   hargaNominal Float
 
   promoAktif  Boolean   @default(false)

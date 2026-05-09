@@ -99,7 +99,13 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   const tarifIn   = Number(configAi.hargaInput1M)  || 0;
   const tarifOut  = Number(configAi.hargaOutput1M) || 0;
   const avgTokens = configAi.avgTokensPerUse || 2000;
-  const estCostUsd = (avgTokens / 1000000) * ((tarifIn + tarifOut) / 2);
+
+  // IMAGE_GEN: input per /1M token + output flat per /image
+  // LLM: input & output per /1M token
+  const estCostUsd = configAi.pricingUnit === "IMAGE"
+    ? (avgTokens / 1_000_000) * tarifIn + (Number(configAi.hargaPerImage) || 0)
+    : (avgTokens / 1_000_000) * ((tarifIn + tarifOut) / 2);
+
   const estCostIdr = estCostUsd * rateIdr * multiplier;
   const estKoinAi  = Math.ceil(estCostIdr / hargaPerKoinIdr);
   const minKoinRequired = totalKoinFitur + estKoinAi;
@@ -161,7 +167,11 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   // Hitung biaya token nyata (post-call) dan simpan ke DB dalam satu transaksi atomik
   const { prompt_tokens = 0, completion_tokens = 0, total_tokens = 0 } = maiaResponse.data.usage || {};
 
-  const realCostUsd   = (prompt_tokens / 1000000) * tarifIn + (completion_tokens / 1000000) * tarifOut;
+  // IMAGE_GEN: biaya input token nyata + flat per image
+  // LLM: biaya input + output token nyata
+  const realCostUsd = configAi.pricingUnit === "IMAGE"
+    ? (prompt_tokens / 1_000_000) * tarifIn + (Number(configAi.hargaPerImage) || 0)
+    : (prompt_tokens / 1_000_000) * tarifIn + (completion_tokens / 1_000_000) * tarifOut;
   const realCostIdr   = realCostUsd * rateIdr * multiplier;
   const realKoinAi    = Math.ceil(realCostIdr / hargaPerKoinIdr);
   const totalDipotong = totalKoinFitur + realKoinAi;

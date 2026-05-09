@@ -10,46 +10,53 @@ const convertToDays = (value, unit) => {
   }
 };
 
-// Kalkulasi HPP ideal berdasarkan fitur paket dan harga model AI aktif di DB
+// Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
-  const { jumlahKoin, featVirtualTryOn, featHistory } = payload;
+  const { jumlahKoin, featVirtualTryOn, featHistory, llmModelId, imageModelId } = payload;
 
-  const [config, baseModel] = await Promise.all([
-    prisma.systemConfig.findFirst(),
-    prisma.aiModel.findFirst({ orderBy: { hargaInput1M: "asc" } }),
+  const config = await prisma.systemConfig.findFirst();
+  if (!config) throw new Error("Konfigurasi Sistem belum disetting!");
+
+  // Ambil model berdasarkan pilihan admin; fallback ke model aktif termurah jika belum dipilih
+  const [selectedLlm, selectedImage] = await Promise.all([
+    llmModelId
+      ? prisma.aiModel.findUnique({ where: { id: llmModelId } })
+      : prisma.aiModel.findFirst({ where: { typeAi: "LLM", isActive: true }, orderBy: { hargaInput1M: "asc" } }),
+    imageModelId
+      ? prisma.aiModel.findUnique({ where: { id: imageModelId } })
+      : prisma.aiModel.findFirst({ where: { typeAi: "IMAGE_GEN", isActive: true } }),
   ]);
 
-  if (!config || !baseModel) {
-    throw new Error("Konfigurasi Sistem atau Model API belum disetting!");
-  }
+  if (!selectedLlm) throw new Error("Model LLM belum dipilih atau tidak ditemukan!");
 
   const effectiveRate = config.baseRateUsdIdr * (1 + config.inflationBuffer);
 
-  // Gunakan model IMAGE_GEN jika Virtual Try-On aktif (biaya lebih tinggi)
-  let modelToUse = baseModel;
-  if (featVirtualTryOn) {
-    const genModel = await prisma.aiModel.findFirst({ where: { typeAi: "IMAGE_GEN" } });
-    if (genModel) modelToUse = genModel;
-  }
+  // Pilih model yang digunakan untuk menghitung biaya per aksi
+  const modelToUse = featVirtualTryOn && selectedImage ? selectedImage : selectedLlm;
 
   const tarifIn   = Number(modelToUse.hargaInput1M)  || 0;
   const tarifOut  = Number(modelToUse.hargaOutput1M) || 0;
   const avgTokens = modelToUse.avgTokensPerUse || 2000;
 
-  const costPerActionUsd = (avgTokens / 1000000) * ((tarifIn + tarifOut) / 2);
-  let costPerActionIdr   = costPerActionUsd * effectiveRate;
+  // IMAGE_GEN: input per /1M token + output flat per /image
+  // LLM: input & output per /1M token
+  const costPerActionUsd = modelToUse.pricingUnit === "IMAGE"
+    ? (avgTokens / 1_000_000) * tarifIn + (Number(modelToUse.hargaPerImage) || 0)
+    : (avgTokens / 1_000_000) * ((tarifIn + tarifOut) / 2);
 
-  // Extended History: tambah biaya storage ~Rp 50/aksi (estimasi cloud storage 5 tahun)
+  let costPerActionIdr = costPerActionUsd * effectiveRate;
+
+  // Extended History: tambah biaya storage ~Rp 50/aksi
   if (featHistory) costPerActionIdr += 50;
 
   // Markup per fitur premium untuk membedakan HPP antar tier paket
-  if (payload.featSymmetry)       costPerActionIdr += 1000;
-  if (payload.featAdvMapping)     costPerActionIdr += 1000;
-  if (payload.featTrendAnalysis)  costPerActionIdr += 1000;
+  if (payload.featSymmetry)      costPerActionIdr += 1000;
+  if (payload.featAdvMapping)    costPerActionIdr += 1000;
+  if (payload.featTrendAnalysis) costPerActionIdr += 1000;
 
   // 1 Aksi = 10 Koin (COIN_SCALE)
-  const COIN_SCALE    = 10;
-  const estimasiAksi  = jumlahKoin / COIN_SCALE;
+  const COIN_SCALE      = 10;
+  const estimasiAksi    = jumlahKoin / COIN_SCALE;
   const totalApiCostIdr = costPerActionIdr * estimasiAksi;
 
   const rawHppIdeal =
@@ -60,8 +67,11 @@ const calculateLiveHPP = async (payload) => {
     estimasiModalApi: Math.ceil(totalApiCostIdr),
     hppIdeal:         Math.ceil(rawHppIdeal),
     estimasiAksi:     Math.floor(estimasiAksi),
+    modelLlm:         selectedLlm  ? { id: selectedLlm.id,   nama: selectedLlm.namaRouter }  : null,
+    modelImage:       selectedImage ? { id: selectedImage.id, nama: selectedImage.namaRouter } : null,
   };
 };
+
 
 const getAllPackages = async (page = 1, limit = 10) => {
   const skip = (page - 1) * limit;
@@ -132,6 +142,9 @@ const createNewPackage = async (validatedData) => {
       featAdvMapping:   validatedData.featAdvMapping,
       featVirtualTryOn: validatedData.featVirtualTryOn,
       featHistory:      validatedData.featHistory,
+      featTrendAnalysis: validatedData.featTrendAnalysis,
+      llmModelId:       validatedData.llmModelId   || null,
+      imageModelId:     validatedData.imageModelId || null,
       hppIdeal:         validatedData.hppIdeal,
       hargaNominal:     validatedData.hargaNominal,
       promoAktif:       validatedData.promoAktif,
@@ -142,6 +155,7 @@ const createNewPackage = async (validatedData) => {
     },
   });
 };
+
 
 const updatePackageById = async (id, validatedData) => {
   const existingPackage = await prisma.subscriptionPackage.findUnique({ where: { id } });

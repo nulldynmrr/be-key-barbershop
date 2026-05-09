@@ -3,6 +3,7 @@ const {
   getExchangeSetting,
   updateExchangeSetting,
   getAiModels,
+  getActiveModelsByType,
   saveAiModel,
   deleteAiModel,
   getAiUsageLogs,
@@ -10,6 +11,7 @@ const {
   testConnection,
   getFeaturePricing,
   updateFeaturePrice,
+  calculateIdealKoin,
 } = require("../controllers/aiconfig.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
@@ -97,10 +99,20 @@ router.put("/exchange", updateExchangeSetting);
  *               typeAi:
  *                 type: string
  *                 example: "IMAGE_GEN"
+ *               pricingUnit:
+ *                 type: string
+ *                 example: "IMAGE"
+ *                 description: "TOKEN (untuk LLM) atau IMAGE (untuk image gen)"
  *               hargaInput1M:
  *                 type: number
+ *                 description: "Dipakai jika pricingUnit = TOKEN"
  *               hargaOutput1M:
  *                 type: number
+ *                 description: "Dipakai jika pricingUnit = TOKEN"
+ *               hargaPerImage:
+ *                 type: number
+ *                 example: 0.04
+ *                 description: "Dipakai jika pricingUnit = IMAGE"
  *               maxBudget:
  *                 type: number
  *               rpmLimit:
@@ -112,6 +124,21 @@ router.put("/exchange", updateExchangeSetting);
  *         description: Berhasil menyimpan config baru
  */
 router.get("/models", getAiModels);
+
+/**
+ * @swagger
+ * /v1/ai-config/models/active:
+ *   get:
+ *     summary: List model aktif dikelompokkan per tipe (LLM & IMAGE_GEN) — untuk dropdown pembuatan paket
+ *     tags: [AI Engine Control]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "{ llm: [...], image_gen: [...] }"
+ */
+router.get("/models/active", getActiveModelsByType);
+
 router.post("/models", saveAiModel);
 
 /**
@@ -269,5 +296,36 @@ router.get("/feature-pricing", getFeaturePricing);
  *         description: Berhasil update harga koin
  */
 router.put("/feature-pricing/:id", updateFeaturePrice);
+
+/**
+ * @swagger
+ * /v1/ai-config/calculate-ideal-koin:
+ *   post:
+ *     summary: Hitung estimasi koin ideal per 1x generate berdasarkan fitur aktif
+ *     tags: [AI Engine Control]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               featVirtualTryOn:
+ *                 type: boolean
+ *               featSymmetry:
+ *                 type: boolean
+ *               featAdvMapping:
+ *                 type: boolean
+ *               featHistory:
+ *                 type: boolean
+ *               featTrendAnalysis:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Hasil estimasi koin ideal per 1 generate
+ */
+router.post("/calculate-ideal-koin", calculateIdealKoin);
 
 module.exports = router;
