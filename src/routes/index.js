@@ -17,6 +17,7 @@ const adminRoutes = r(require("./admin.routes"));
 const userRoutes = r(require("./user.routes"));
 const packageRoutes = r(require("./package.routes"));
 const notificationRoutes = r(require("./notification.routes"));
+const socialMediaRoutes = r(require("./socialmedia.routes"));
 
 router.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 router.use("/auth", authRoutes);
@@ -31,5 +32,6 @@ router.use("/admin", adminRoutes);
 router.use("/users", userRoutes);
 router.use("/packages", packageRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/social-media", socialMediaRoutes);
 
 module.exports = router;
