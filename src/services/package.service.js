@@ -27,21 +27,28 @@ const calculateLiveHPP = async (payload) => {
 
   const effectiveRate = config.baseRateUsdIdr * (1 + config.inflationBuffer);
 
-  let costPerTokenUsd = baseModel.hargaInput1M / 1000000;
-  let avgTokens = baseModel.avgTokensPerUse;
+  let modelToUse = baseModel;
 
   if (featVirtualTryOn) {
     const genModel = await prisma.aiModel.findFirst({
       where: { typeAi: "IMAGE_GEN" },
     });
     if (genModel) {
-      costPerTokenUsd = genModel.hargaOutput1M / 1000000;
-      avgTokens = genModel.avgTokensPerUse;
+      modelToUse = genModel;
     }
   }
 
-  const costPerActionIdr = costPerTokenUsd * avgTokens * effectiveRate;
-  const totalApiCostIdr = costPerActionIdr * jumlahKoin;
+  const tarifIn = Number(modelToUse.hargaInput1M) || 0;
+  const tarifOut = Number(modelToUse.hargaOutput1M) || 0;
+  const avgTokens = modelToUse.avgTokensPerUse || 2000;
+
+  const costPerActionUsd = (avgTokens / 1000000) * ((tarifIn + tarifOut) / 2);
+  const costPerActionIdr = costPerActionUsd * effectiveRate;
+
+  const COIN_SCALE = 10;
+  const estimasiAksi = jumlahKoin / COIN_SCALE;
+
+  const totalApiCostIdr = costPerActionIdr * estimasiAksi;
   const rawHppIdeal =
     (totalApiCostIdr * config.globalMultiplier + config.adminFeeFixed) /
     (1 - config.mdrPercentage);
@@ -49,6 +56,7 @@ const calculateLiveHPP = async (payload) => {
   return {
     estimasiModalApi: Math.ceil(totalApiCostIdr),
     hppIdeal: Math.ceil(rawHppIdeal),
+    estimasiAksi: Math.floor(estimasiAksi)
   };
 };
 

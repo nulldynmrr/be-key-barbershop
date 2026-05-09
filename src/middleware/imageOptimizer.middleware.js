@@ -11,7 +11,7 @@ const optimizeImage = async (req, res, next) => {
     return next();
   }
 
-  const MAX_SIZE = 3 * 1024 * 1024; // 3MB
+  const MAX_SIZE = 2 * 1024 * 1024; // 2MB
 
   if (req.file.size > MAX_SIZE) {
     try {

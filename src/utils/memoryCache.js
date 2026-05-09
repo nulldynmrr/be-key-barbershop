@@ -14,11 +14,18 @@ class MemoryCache {
   }
 
   set(key, value, ttlSeconds = 300) {
-    // Default cache 5 menit
     this.cache.set(key, {
       value,
       expiry: Date.now() + ttlSeconds * 1000,
     });
+  }
+
+  delete(key) {
+    this.cache.delete(key);
+  }
+
+  clear() {
+    this.cache.clear();
   }
 }
 

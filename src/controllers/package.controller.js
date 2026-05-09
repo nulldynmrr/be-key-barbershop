@@ -3,6 +3,7 @@ const {
   packageSchema,
   updatePackageSchema,
 } = require("../validations/package.validation");
+const cache = require("../utils/memoryCache");
 
 const getLiveHPP = async (req, res, next) => {
   try {
@@ -32,6 +33,7 @@ const createPackage = async (req, res, next) => {
   try {
     const validatedData = packageSchema.parse(req.body);
     const data = await packageService.createNewPackage(validatedData);
+    cache.clear();
     if (req.log)
       req.log.info({ packageId: data.id }, "Paket baru sukses dibuat");
     res
@@ -53,6 +55,7 @@ const updatePackage = async (req, res, next) => {
       id,
       validatedData,
     );
+    cache.clear();
     if (req.log) req.log.info({ packageId: id }, "Paket sukses diupdate");
     res.status(200).json({
       success: true,
@@ -71,6 +74,7 @@ const deletePackage = async (req, res, next) => {
   try {
     const { id } = req.params;
     await packageService.deletePackageById(id);
+    cache.clear(); // Bersihkan cache
     if (req.log) req.log.info({ packageId: id }, "Paket sukses dihapus");
     res.status(200).json({ success: true, message: "Paket berhasil dihapus" });
   } catch (error) {
