@@ -3,6 +3,8 @@ const router = express.Router();
 const serviceController = require("../controllers/service.controller");
 const upload = require("../utils/upload");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
+const optimizeImage = require("../middleware/imageOptimizer.middleware");
+
 
 /**
  * @swagger
@@ -52,6 +54,7 @@ router.post(
   verifyToken,
   isAdmin,
   upload.single("image"),
+  optimizeImage,
   serviceController.createService,
 );
 
@@ -109,6 +112,7 @@ router.put(
   verifyToken,
   isAdmin,
   upload.single("image"),
+  optimizeImage,
   serviceController.updateService,
 );
 router.delete("/:id", verifyToken, isAdmin, serviceController.deleteService);

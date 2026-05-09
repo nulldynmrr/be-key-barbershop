@@ -3,6 +3,8 @@ const router = express.Router();
 const barberController = require("../controllers/barber.controller");
 const upload = require("../utils/upload");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
+const optimizeImage = require("../middleware/imageOptimizer.middleware");
+
 
 /**
  * @swagger
@@ -51,6 +53,7 @@ router.post(
   verifyToken,
   isAdmin,
   upload.single("image"),
+  optimizeImage,
   barberController.createBarber,
 );
 
@@ -112,6 +115,7 @@ router.put(
   verifyToken,
   isAdmin,
   upload.single("image"),
+  optimizeImage,
   barberController.updateBarber
 );
 

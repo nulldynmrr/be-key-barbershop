@@ -1,7 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 
-// Ambil semua Barber
 exports.getAllBarbers = async (req, res) => {
   try {
     const barbers = await prisma.barber.findMany();
@@ -11,12 +10,10 @@ exports.getAllBarbers = async (req, res) => {
   }
 };
 
-// Tambah Barber Baru
 exports.createBarber = async (req, res) => {
   try {
     const { nama_kapster, spesialisasi, pengalaman } = req.body;
 
-    // Field di database kamu namanya url_foto_upload
     const url_foto_upload = req.file
       ? `/uploads/barbers/${req.file.filename}`
       : null;
@@ -36,7 +33,6 @@ exports.createBarber = async (req, res) => {
   }
 };
 
-// Edit Barber
 exports.updateBarber = async (req, res) => {
   try {
     const { id } = req.params;
@@ -70,7 +66,6 @@ exports.updateBarber = async (req, res) => {
   }
 };
 
-// Hapus Barber
 exports.deleteBarber = async (req, res) => {
   try {
     const { id } = req.params;

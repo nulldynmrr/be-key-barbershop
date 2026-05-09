@@ -3,6 +3,8 @@ const router = express.Router();
 const multer = require("multer");
 const { analyzeFace } = require("../controllers/ai.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
+const optimizeImage = require("../middleware/imageOptimizer.middleware");
+
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -112,6 +114,6 @@ const upload = multer({ storage: multer.memoryStorage() });
  *       401:
  *         description: Unauthorized
  */
-router.post("/analyze-face", verifyToken, upload.single("foto"), analyzeFace);
+router.post("/analyze-face", verifyToken, upload.single("foto"), optimizeImage, analyzeFace);
 
 module.exports = router;
