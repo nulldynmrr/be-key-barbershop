@@ -54,4 +54,72 @@ router.post(
   barberController.createBarber,
 );
 
+/**
+ * @swagger
+ * /barbers/{id}:
+ *   put:
+ *     summary: Edit data kapster/barber (Admin Only)
+ *     tags: [Barbers]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID Barber
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nama_kapster:
+ *                 type: string
+ *               spesialisasi:
+ *                 type: string
+ *               pengalaman:
+ *                 type: integer
+ *               image:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Barber berhasil diupdate
+ *       404:
+ *         description: Barber tidak ditemukan
+ *   delete:
+ *     summary: Hapus data kapster/barber (Admin Only)
+ *     tags: [Barbers]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID Barber
+ *     responses:
+ *       200:
+ *         description: Barber berhasil dihapus
+ *       404:
+ *         description: Barber tidak ditemukan
+ */
+router.put(
+  "/:id",
+  verifyToken,
+  isAdmin,
+  upload.single("image"),
+  barberController.updateBarber
+);
+
+router.delete(
+  "/:id",
+  verifyToken,
+  isAdmin,
+  barberController.deleteBarber
+);
+
 module.exports = router;
