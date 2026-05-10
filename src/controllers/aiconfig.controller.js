@@ -304,14 +304,32 @@ exports.calculateIdealKoin = async (req, res, next) => {
       featVirtualTryOn,
       featHistory,
       featTrendAnalysis,
+      llmModelId,
+      imageModelId,
     } = req.body;
 
-    const [config, llmModel, imageModel, pricingList] = await Promise.all([
+    const [config, pricingList] = await Promise.all([
       prisma.systemConfig.findFirst(),
-      prisma.aiModel.findFirst({ where: { typeAi: "LLM", isActive: true }, orderBy: { hargaInput1M: "asc" } }),
-      prisma.aiModel.findFirst({ where: { typeAi: "IMAGE_GEN", isActive: true } }),
       prisma.featurePricing.findMany({ where: { isActive: true } }),
     ]);
+
+    let llmModel = null;
+    if (llmModelId) {
+      llmModel = await prisma.aiModel.findFirst({ where: { id: llmModelId, typeAi: "LLM" } });
+    }
+    if (!llmModel) {
+      llmModel = await prisma.aiModel.findFirst({ where: { typeAi: "LLM", isActive: true }, orderBy: { hargaInput1M: "asc" } });
+    }
+
+    let imageModel = null;
+    if (featVirtualTryOn) {
+      if (imageModelId) {
+        imageModel = await prisma.aiModel.findFirst({ where: { id: imageModelId, typeAi: "IMAGE_GEN" } });
+      }
+      if (!imageModel) {
+        imageModel = await prisma.aiModel.findFirst({ where: { typeAi: "IMAGE_GEN", isActive: true } });
+      }
+    }
 
     if (!config || !llmModel) {
       return res.status(500).json({ success: false, message: "Konfigurasi sistem / model AI belum lengkap." });
@@ -374,7 +392,15 @@ exports.calculateIdealKoin = async (req, res, next) => {
     for (const [code, aktif] of Object.entries(featureMap)) {
       if (!aktif) continue;
       const fp = pricingList.find((p) => p.featureCode === code);
-      if (fp) totalKoinFitur += fp.koinCost;
+      let costFitur = 0;
+      if (fp && fp.koinCost > 0) {
+        costFitur = fp.koinCost;
+      } else if (code !== "STANDARD_SCAN") {
+        // Enforce: setiap fitur ekstra yang aktif WAJIB menambah minimal 1 koin
+        // agar sesuai keinginan admin bahwa harga harus naik jika ada fitur tambahan
+        costFitur = 1;
+      }
+      totalKoinFitur += costFitur;
     }
 
     const hppPerGenerateIdr = (modalApiIdr * multiplier + adminFee) / (1 - mdr);
