@@ -28,6 +28,7 @@ const baseFields = {
   hppIdeal: z
     .number()
     .positive("Sistem butuh HPP Ideal untuk validasi boncos!"),
+  hppBreakdown: z.any().optional().nullable(),
   hargaNominal: z.number().positive(),
 
   durasi_value: z.number().int().positive().optional().nullable(),

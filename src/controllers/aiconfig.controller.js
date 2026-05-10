@@ -48,10 +48,26 @@ exports.updateExchangeSetting = async (req, res, next) => {
 exports.getAiModels = async (req, res, next) => {
   try {
     const models = await prisma.aiModel.findMany({ orderBy: { namaRouter: "asc" } });
-    const maskedModels = models.map((m) => ({
-      ...m,
-      apiKey: "********" + m.apiKey.substring(m.apiKey.length - 4),
-    }));
+    
+    // Hitung budget terpakai dari SystemApiLog per model_name
+    const apiLogsAgg = await prisma.systemApiLog.groupBy({
+      by: ['model_name'],
+      _sum: { cost_usd: true },
+    });
+
+    const maskedModels = models.map((m) => {
+      const usage = apiLogsAgg.find(agg => agg.model_name === m.modelName || agg.model_name === m.namaRouter);
+      const usedBudget = usage && usage._sum.cost_usd ? parseFloat(usage._sum.cost_usd) : 0;
+      const isWarning = m.maxBudget > 0 && usedBudget >= (m.maxBudget * 0.8);
+
+      return {
+        ...m,
+        usedBudget,
+        isWarning,
+        apiKey: "********" + m.apiKey.substring(m.apiKey.length - 4),
+      };
+    });
+
     res.status(200).json({ success: true, data: maskedModels });
   } catch (error) {
     next(error);
@@ -98,7 +114,7 @@ exports.saveAiModel = async (req, res, next) => {
     const modelData = {
       namaRouter, baseUrl, modelName,
       typeAi, pricingUnit: resolvedUnit,
-      hargaInput1M:  Number(hargaInput1M)  || 0, // selalu berlaku untuk semua tipe
+      hargaInput1M: Number(hargaInput1M) || 0, // selalu berlaku untuk semua tipe
       hargaOutput1M: resolvedUnit === "TOKEN" ? Number(hargaOutput1M) || 0 : 0,
       hargaPerImage: resolvedUnit === "IMAGE" ? Number(hargaPerImage) || 0 : 0,
       maxBudget, rpmLimit, isActive,
@@ -135,10 +151,24 @@ exports.deleteAiModel = async (req, res, next) => {
 exports.toggleModelStatus = async (req, res, next) => {
   try {
     const { isActive } = req.body;
+    const modelId = req.params.id;
+    
     await prisma.aiModel.update({
-      where: { id: req.params.id },
+      where: { id: modelId },
       data: { isActive },
     });
+
+    if (!isActive) {
+      await prisma.subscriptionPackage.updateMany({
+        where: {
+          OR: [
+            { llmModelId: modelId },
+            { imageModelId: modelId }
+          ]
+        },
+        data: { status: "INAKTIF" }
+      });
+    }
     res.status(200).json({
       success: true,
       message: `Router berhasil di-${isActive ? "aktifkan" : "matikan"}`,
@@ -206,30 +236,19 @@ exports.getAiUsageLogs = async (req, res, next) => {
       prisma.systemConfig.findUnique({ where: { id: 1 } }),
     ]);
 
-    const rateIdr = config?.baseRateUsdIdr || 16000;
+    const globalMultiplier = config?.globalMultiplier || 1.35;
     const formattedLogs = logs.map((log) => {
       const modalUsd = Number(log.cost_usd);
-      const modalIdr = modalUsd * rateIdr;
-
+      const chargeUsd = modalUsd * globalMultiplier;
+      const profitUsd = chargeUsd - modalUsd;
       return {
         id: log.id,
         timestamp: log.tgl_penggunaan,
         email_user: log.user?.email || "Unknown",
-        model: log.model_name,
         tokens_in_out: `${log.input_tokens} / ${log.output_tokens}`,
-        total_tokens: log.total_tokens,
-
-        // MODAL (cost admin ke provider AI)
-        modal_api_usd: `$${modalUsd.toFixed(6)}`,
-        modal_api_idr: `Rp ${Math.ceil(modalIdr).toLocaleString("id-ID")}`,
-
-        // CHARGE (koin yang dipotong dari user)
-        koin_charged: log.koin_charged,
-        service_fee_koin: log.service_fee_koin,
-        token_fee_koin: log.token_fee_koin,
-
-        // FITUR YANG DIPAKAI
-        features_used: log.features_used ? JSON.parse(log.features_used) : [],
+        modal_api_usd: `$${modalUsd.toFixed(5)}`,
+        charge_user_usd: `$${chargeUsd.toFixed(5)}`,
+        profit_usd: `+$${profitUsd.toFixed(5)}`,
       };
     });
 
@@ -308,66 +327,51 @@ exports.calculateIdealKoin = async (req, res, next) => {
       imageModelId,
     } = req.body;
 
-    const [config, pricingList] = await Promise.all([
+    const [config, llmModel, imageModel, pricingList] = await Promise.all([
       prisma.systemConfig.findFirst(),
+      llmModelId
+        ? prisma.aiModel.findUnique({ where: { id: llmModelId } })
+        : prisma.aiModel.findFirst({ where: { typeAi: "LLM", isActive: true }, orderBy: { hargaInput1M: "asc" } }),
+      imageModelId
+        ? prisma.aiModel.findUnique({ where: { id: imageModelId } })
+        : prisma.aiModel.findFirst({ where: { typeAi: "IMAGE_GEN", isActive: true } }),
       prisma.featurePricing.findMany({ where: { isActive: true } }),
     ]);
-
-    let llmModel = null;
-    if (llmModelId) {
-      llmModel = await prisma.aiModel.findFirst({ where: { id: llmModelId, typeAi: "LLM" } });
-    }
-    if (!llmModel) {
-      llmModel = await prisma.aiModel.findFirst({ where: { typeAi: "LLM", isActive: true }, orderBy: { hargaInput1M: "asc" } });
-    }
-
-    let imageModel = null;
-    if (featVirtualTryOn) {
-      if (imageModelId) {
-        imageModel = await prisma.aiModel.findFirst({ where: { id: imageModelId, typeAi: "IMAGE_GEN" } });
-      }
-      if (!imageModel) {
-        imageModel = await prisma.aiModel.findFirst({ where: { typeAi: "IMAGE_GEN", isActive: true } });
-      }
-    }
 
     if (!config || !llmModel) {
       return res.status(500).json({ success: false, message: "Konfigurasi sistem / model AI belum lengkap." });
     }
 
-    const rateIdr    = config.baseRateUsdIdr * (1 + config.inflationBuffer);
+    const rateIdr = config.baseRateUsdIdr * (1 + config.inflationBuffer);
     const multiplier = config.globalMultiplier || 1.35;
-    const adminFee   = config.adminFeeFixed    || 4500;
-    const mdr        = config.mdrPercentage    || 0.007;
+    const adminFee = config.adminFeeFixed || 4500;
+    const mdr = config.mdrPercentage || 0.007;
 
     const activeModel = featVirtualTryOn && imageModel ? imageModel : llmModel;
 
-    // Estimasi harga rata-rata per token USD berdasarkan model yang dipakai
-    let avgTokenCostUsd = 0;
-    if (activeModel.pricingUnit === "IMAGE") {
-      avgTokenCostUsd = (Number(activeModel.hargaInput1M) || 0) / 1_000_000;
-    } else {
-      avgTokenCostUsd = ((Number(activeModel.hargaInput1M) || 0) + (Number(activeModel.hargaOutput1M) || 0)) / 2 / 1_000_000;
-    }
+    // === 1. HITUNG COST LLM (Selalu Dihitung) ===
+    let llmAvgTokenCostUsd = ((Number(llmModel.hargaInput1M) || 0) + (Number(llmModel.hargaOutput1M) || 0)) / 2 / 1_000_000;
+    let totalEstimatedTokens = llmModel.avgTokensPerUse || 2000;
 
-    // Hitung base token untuk fitur dasar
-    let totalEstimatedTokens = activeModel.avgTokensPerUse || 2000;
-
-    // Tambahkan estimasi ekstra token untuk setiap fitur lanjutan yang aktif
-    if (featSymmetry)           totalEstimatedTokens += 300;
-    if (featAdvMapping)         totalEstimatedTokens += 500;
-    if (featHairAnalysis)       totalEstimatedTokens += 400;
-    if (featRiskAnalysis)       totalEstimatedTokens += 250;
+    // Estimasi token tambahan untuk LLM
+    if (featSymmetry) totalEstimatedTokens += 300;
+    if (featAdvMapping) totalEstimatedTokens += 500;
+    if (featHairAnalysis) totalEstimatedTokens += 400;
+    if (featRiskAnalysis) totalEstimatedTokens += 250;
     if (featBarberInstructions) totalEstimatedTokens += 250;
-    if (featFaceHeatmap)        totalEstimatedTokens += 300;
-    if (featTrendAnalysis)      totalEstimatedTokens += 400;
+    if (featFaceHeatmap) totalEstimatedTokens += 300;
+    if (featTrendAnalysis) totalEstimatedTokens += 400;
 
-    // Total HPP Modal API (USD)
-    let modalApiUsd = totalEstimatedTokens * avgTokenCostUsd;
+    let modalApiUsd = totalEstimatedTokens * llmAvgTokenCostUsd;
 
-    // Tambah biaya generate gambar jika menggunakan model IMAGE
-    if (activeModel.pricingUnit === "IMAGE") {
-      modalApiUsd += (Number(activeModel.hargaPerImage) || 0);
+    // === 2. HITUNG COST IMAGE GEN (Jika Aktif) ===
+    if (featVirtualTryOn && imageModel) {
+      modalApiUsd += (Number(imageModel.hargaPerImage) || 0);
+      
+      // Jika Image Gen menggunakan token untuk input prompt
+      let imageTokenCost = (Number(imageModel.hargaInput1M) || 0) / 1_000_000;
+      let imageTokens = imageModel.avgTokensPerUse || 0;
+      modalApiUsd += (imageTokens * imageTokenCost);
     }
 
     let modalApiIdr = modalApiUsd * rateIdr;
@@ -376,50 +380,42 @@ exports.calculateIdealKoin = async (req, res, next) => {
     if (featHistory) modalApiIdr += 50;
 
     const featureMap = {
-      STANDARD_SCAN:        true,
-      FACE_HEATMAP:         featFaceHeatmap,
-      SYMMETRY:             featSymmetry,
-      ADV_MAPPING:          featAdvMapping,
-      HAIR_ANALYSIS:        featHairAnalysis,
-      RISK_ANALYSIS:        featRiskAnalysis,
-      BARBER_INSTRUCTIONS:  featBarberInstructions,
-      VIRTUAL_TRY_ON:       featVirtualTryOn,
-      HISTORY:              featHistory,
-      TREND_ANALYSIS:       featTrendAnalysis,
+      STANDARD_SCAN: true,
+      FACE_HEATMAP: featFaceHeatmap,
+      SYMMETRY: featSymmetry,
+      ADV_MAPPING: featAdvMapping,
+      HAIR_ANALYSIS: featHairAnalysis,
+      RISK_ANALYSIS: featRiskAnalysis,
+      BARBER_INSTRUCTIONS: featBarberInstructions,
+      VIRTUAL_TRY_ON: featVirtualTryOn,
+      HISTORY: featHistory,
+      TREND_ANALYSIS: featTrendAnalysis,
     };
 
     let totalKoinFitur = 0;
     for (const [code, aktif] of Object.entries(featureMap)) {
       if (!aktif) continue;
       const fp = pricingList.find((p) => p.featureCode === code);
-      let costFitur = 0;
-      if (fp && fp.koinCost > 0) {
-        costFitur = fp.koinCost;
-      } else if (code !== "STANDARD_SCAN") {
-        // Enforce: setiap fitur ekstra yang aktif WAJIB menambah minimal 1 koin
-        // agar sesuai keinginan admin bahwa harga harus naik jika ada fitur tambahan
-        costFitur = 1;
-      }
-      totalKoinFitur += costFitur;
+      if (fp) totalKoinFitur += fp.koinCost;
     }
 
     const hppPerGenerateIdr = (modalApiIdr * multiplier + adminFee) / (1 - mdr);
-    const refHargaPerKoin   = 50;
-    const koinApiIdr        = Math.ceil(modalApiIdr * multiplier / refHargaPerKoin);
-    const totalKoinIdeal    = totalKoinFitur + koinApiIdr;
+    const refHargaPerKoin = 50;
+    const koinApiIdr = Math.ceil(modalApiIdr * multiplier / refHargaPerKoin);
+    const totalKoinIdeal = totalKoinFitur + koinApiIdr;
 
     res.status(200).json({
       success: true,
       data: {
-        model_aktif:       activeModel.namaRouter,
-        pricing_unit:      activeModel.pricingUnit,
-        modal_api_usd:     `$${modalApiUsd.toFixed(6)}`,
-        modal_api_idr:     Math.ceil(modalApiIdr),
-        hpp_per_generate:  Math.ceil(hppPerGenerateIdr),
-        koin_fitur:        totalKoinFitur,
+        model_aktif: activeModel.namaRouter,
+        pricing_unit: activeModel.pricingUnit,
+        modal_api_usd: `$${modalApiUsd.toFixed(6)}`,
+        modal_api_idr: Math.ceil(modalApiIdr),
+        hpp_per_generate: Math.ceil(hppPerGenerateIdr),
+        koin_fitur: totalKoinFitur,
         koin_api_estimate: koinApiIdr,
-        total_koin_ideal:  totalKoinIdeal,
-        fitur_aktif:       Object.entries(featureMap).filter(([, v]) => v).map(([k]) => k),
+        total_koin_ideal: totalKoinIdeal,
+        fitur_aktif: Object.entries(featureMap).filter(([, v]) => v).map(([k]) => k),
         catatan: "Koin ideal dihitung dengan asumsi harga referensi Rp 50/koin. Sesuaikan dengan harga paket aktual Anda.",
       },
     });

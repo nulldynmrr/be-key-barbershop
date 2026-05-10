@@ -16,6 +16,7 @@ const calculateLiveHPP = async (payload) => {
     jumlahKoin, featVirtualTryOn, featHistory, llmModelId, imageModelId,
     featSymmetry, featAdvMapping,
     featFaceHeatmap, featHairAnalysis, featRiskAnalysis, featBarberInstructions,
+    typeValue,
   } = payload;
   const featTrendAnalysis = payload.featTrendAnalysis || payload.featHairstyleTrend || false;
 
@@ -36,14 +37,10 @@ const calculateLiveHPP = async (payload) => {
   const effectiveRate = config.baseRateUsdIdr * (1 + config.inflationBuffer);
   const modelToUse = featVirtualTryOn && selectedImage ? selectedImage : selectedLlm;
 
-  let avgTokenCostUsd = 0;
-  if (modelToUse.pricingUnit === "IMAGE") {
-    avgTokenCostUsd = (Number(modelToUse.hargaInput1M) || 0) / 1_000_000;
-  } else {
-    avgTokenCostUsd = ((Number(modelToUse.hargaInput1M) || 0) + (Number(modelToUse.hargaOutput1M) || 0)) / 2 / 1_000_000;
-  }
+  // === 1. HITUNG COST LLM (Selalu Dihitung) ===
+  let llmAvgTokenCostUsd = ((Number(selectedLlm.hargaInput1M) || 0) + (Number(selectedLlm.hargaOutput1M) || 0)) / 2 / 1_000_000;
+  let totalEstimatedTokens = selectedLlm.avgTokensPerUse || 2000;
 
-  let totalEstimatedTokens = modelToUse.avgTokensPerUse || 2000;
   if (featSymmetry)           totalEstimatedTokens += 300;
   if (featAdvMapping)         totalEstimatedTokens += 500;
   if (featHairAnalysis)       totalEstimatedTokens += 400;
@@ -52,20 +49,38 @@ const calculateLiveHPP = async (payload) => {
   if (featFaceHeatmap)        totalEstimatedTokens += 300;
   if (featTrendAnalysis)      totalEstimatedTokens += 400;
 
-  let costPerActionUsd = totalEstimatedTokens * avgTokenCostUsd;
-  if (modelToUse.pricingUnit === "IMAGE") {
-    costPerActionUsd += (Number(modelToUse.hargaPerImage) || 0);
+  let costPerActionUsd = totalEstimatedTokens * llmAvgTokenCostUsd;
+
+  // === 2. HITUNG COST IMAGE GEN (Jika Aktif) ===
+  if (featVirtualTryOn && selectedImage) {
+    costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0);
+    
+    let imageTokenCost = (Number(selectedImage.hargaInput1M) || 0) / 1_000_000;
+    let imageTokens = selectedImage.avgTokensPerUse || 0;
+    costPerActionUsd += (imageTokens * imageTokenCost);
   }
 
   let costPerActionIdr = costPerActionUsd * effectiveRate;
-  if (featHistory) costPerActionIdr += 50;
+  let historyCostIdr = featHistory ? 50 : 0;
+  costPerActionIdr += historyCostIdr;
 
   const COIN_SCALE   = 10;
   const estimasiAksi = jumlahKoin / COIN_SCALE;
   const totalApiCostIdr = costPerActionIdr * estimasiAksi;
 
+  const llmCostIdr = (totalEstimatedTokens * llmAvgTokenCostUsd) * effectiveRate * estimasiAksi;
+  const imageCostIdr = (featVirtualTryOn && selectedImage) ? (costPerActionUsd - (totalEstimatedTokens * llmAvgTokenCostUsd)) * effectiveRate * estimasiAksi : 0;
+  const storageCostIdr = historyCostIdr * estimasiAksi;
+
+  // Logika Marketing/Keuangan:
+  // Jika SUBSCRIPTION, berikan diskon pada multiplier untuk mendorong user langganan
+  // Jika ONTIME, gunakan multiplier normal
+  const activeMultiplier = typeValue === "SUBSCRIPTION" 
+    ? config.globalMultiplier * 0.85 // Diskon 15% margin
+    : config.globalMultiplier;
+
   const rawHppIdeal =
-    (totalApiCostIdr * config.globalMultiplier + config.adminFeeFixed) /
+    (totalApiCostIdr * activeMultiplier + config.adminFeeFixed) /
     (1 - config.mdrPercentage);
 
   return {
@@ -76,6 +91,14 @@ const calculateLiveHPP = async (payload) => {
     costPerActionUsd:       costPerActionUsd,
     modelLlm:   selectedLlm  ? { id: selectedLlm.id,   nama: selectedLlm.namaRouter }  : null,
     modelImage: selectedImage ? { id: selectedImage.id, nama: selectedImage.namaRouter } : null,
+    breakdown: {
+      llmCost: Math.ceil(llmCostIdr),
+      imageCost: Math.ceil(imageCostIdr),
+      storageCost: Math.ceil(storageCostIdr),
+      multiplier: activeMultiplier,
+      adminFee: config.adminFeeFixed,
+      mdrPercentage: config.mdrPercentage
+    }
   };
 };
 
@@ -83,13 +106,38 @@ const calculateLiveHPP = async (payload) => {
 const getAllPackages = async (page = 1, limit = 10) => {
   const skip = (page - 1) * limit;
 
+  // 1. Ambil semua model AI dan hitung penggunaannya
+  const allModels = await prisma.aiModel.findMany();
+  const usages = await prisma.systemApiLog.groupBy({
+    by: ["model_name"],
+    _sum: { cost_usd: true },
+  });
+
+  const modelUsageMap = usages.reduce((acc, curr) => {
+    acc[curr.model_name] = Number(curr._sum.cost_usd || 0);
+    return acc;
+  }, {});
+
+  // 2. Tentukan status tiap model (Aktif & Punya Budget)
+  const modelStatusMap = allModels.reduce((acc, model) => {
+    const costUsd = modelUsageMap[model.modelName] || 0;
+    // Model dianggap "OK" jika aktif dan (budget tak terbatas (0) atau budget belum habis)
+    const isBudgetOk = model.maxBudget === 0 || costUsd < model.maxBudget;
+    acc[model.id] = model.isActive && isBudgetOk;
+    return acc;
+  }, {});
+
+  // 3. Ambil paket (tanpa filter status statis)
   const [total, packages] = await Promise.all([
-    prisma.subscriptionPackage.count({ where: { status: "AKTIF" } }),
+    prisma.subscriptionPackage.count(),
     prisma.subscriptionPackage.findMany({
-      where: { status: "AKTIF" },
       orderBy: { hargaNominal: "asc" },
       skip,
       take: limit,
+      include: {
+        llmModel: true,
+        imageModel: true,
+      },
     }),
   ]);
 
@@ -111,6 +159,20 @@ const getAllPackages = async (page = 1, limit = 10) => {
       else                                   durasi_display = `${pkg.durationDays} Hari`;
     }
 
+    let isPackageActive = true;
+    
+    // Cek model LLM
+    if (!pkg.llmModelId || !modelStatusMap[pkg.llmModelId]) {
+      isPackageActive = false;
+    }
+    
+    // Cek model Image Gen (jika ada Virtual Try On)
+    if (pkg.featVirtualTryOn) {
+      if (!pkg.imageModelId || !modelStatusMap[pkg.imageModelId]) {
+        isPackageActive = false;
+      }
+    }
+
     return {
       id:           pkg.id,
       nama:         pkg.namaPaket,
@@ -121,6 +183,7 @@ const getAllPackages = async (page = 1, limit = 10) => {
       harga_bayar:  isPromoValid ? pkg.hargaDiskon : pkg.hargaNominal,
       is_promo:     !!isPromoValid,
       berakhir_pada: isPromoValid ? pkg.diskonAkhir : null,
+      status:       isPackageActive ? "AKTIF" : "NONAKTIF",
     };
   });
 
@@ -162,6 +225,7 @@ const createNewPackage = async (validatedData) => {
       hargaDiskon:      validatedData.promoAktif ? validatedData.hargaDiskon : null,
       diskonMulai:      validatedData.promoAktif && validatedData.diskonMulai ? new Date(validatedData.diskonMulai) : null,
       diskonAkhir:      validatedData.promoAktif && validatedData.diskonAkhir ? new Date(validatedData.diskonAkhir) : null,
+      hppBreakdown:     validatedData.hppBreakdown || null,
       status:           "AKTIF",
     },
   });
@@ -204,10 +268,43 @@ const deletePackageById = async (id) => {
   return await prisma.subscriptionPackage.delete({ where: { id } });
 };
 
+const togglePackageStatus = async (id, status) => {
+  const existingPackage = await prisma.subscriptionPackage.findUnique({ 
+    where: { id },
+    include: { llmModel: true, imageModel: true }
+  });
+  
+  if (!existingPackage) {
+    const error = new Error("Paket tidak ditemukan");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Jika mau diaktifkan, pastikan model AI yang dipakai dalam keadaan aktif
+  if (status === "AKTIF") {
+    if (existingPackage.llmModelId && existingPackage.llmModel && !existingPackage.llmModel.isActive) {
+      const error = new Error(`Model LLM (${existingPackage.llmModel.modelName}) sedang non-aktif. Aktifkan model tersebut terlebih dahulu.`);
+      error.statusCode = 400;
+      throw error;
+    }
+    if (existingPackage.featVirtualTryOn && existingPackage.imageModelId && existingPackage.imageModel && !existingPackage.imageModel.isActive) {
+      const error = new Error(`Model Image Gen (${existingPackage.imageModel.modelName}) sedang non-aktif. Aktifkan model tersebut terlebih dahulu.`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  return await prisma.subscriptionPackage.update({
+    where: { id },
+    data: { status },
+  });
+};
+
 module.exports = {
   calculateLiveHPP,
   getAllPackages,
   createNewPackage,
   updatePackageById,
   deletePackageById,
+  togglePackageStatus
 };

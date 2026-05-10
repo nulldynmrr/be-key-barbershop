@@ -5,6 +5,7 @@ const {
   updatePackage,
   deletePackage,
   getLiveHPP,
+  togglePackageStatus,
 } = require("../controllers/package.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
@@ -144,5 +145,34 @@ router.put("/:id", verifyToken, isAdmin, updatePackage);
  *         description: Paket dihapus
  */
 router.delete("/:id", verifyToken, isAdmin, deletePackage);
+
+/**
+ * @swagger
+ * /v1/packages/{id}/toggle-status:
+ *   put:
+ *     summary: Toggle status paket (Aktif/Inaktif) (Admin)
+ *     tags: [Pricing & Packages]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status: { type: string, example: "AKTIF" }
+ *     responses:
+ *       200:
+ *         description: Status paket berhasil diubah
+ *       400:
+ *         description: Gagal mengaktifkan karena model AI nonaktif
+ */
+router.put("/:id/toggle-status", verifyToken, isAdmin, togglePackageStatus);
 
 module.exports = router;

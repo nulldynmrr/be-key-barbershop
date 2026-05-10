@@ -82,10 +82,25 @@ const deletePackage = async (req, res, next) => {
   }
 };
 
+const togglePackageStatus = async (req, res, next) => {
+  try {
+    const { status } = req.body;
+    await packageService.togglePackageStatus(req.params.id, status);
+    cache.clear();
+    res.status(200).json({
+      success: true,
+      message: `Paket berhasil di-${status === "AKTIF" ? "aktifkan" : "nonaktifkan"}`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getLiveHPP,
   getActivePackages,
   createPackage,
   updatePackage,
   deletePackage,
+  togglePackageStatus,
 };
