@@ -1,12 +1,27 @@
 const { faceAnalysisSchema } = require("../validations/ai.validation");
 const aiService = require("../services/ai.service");
+const { PrismaClient } = require("@prisma/client");
+const cache = require("../utils/memoryCache");
+
+const prisma = new PrismaClient();
+
+const FEATURE_GATE_MAP = {
+  STANDARD_SCAN:        "featStandardScan",
+  FACE_HEATMAP:         "featFaceHeatmap",
+  SYMMETRY:             "featSymmetry",
+  ADV_MAPPING:          "featAdvMapping",
+  HAIR_ANALYSIS:        "featHairAnalysis",
+  RISK_ANALYSIS:        "featRiskAnalysis",
+  BARBER_INSTRUCTIONS:  "featBarberInstructions",
+  VIRTUAL_TRY_ON:       "featVirtualTryOn",
+  HISTORY:              "featHistory",
+  TREND_ANALYSIS:       "featTrendAnalysis",
+};
 
 exports.analyzeFace = async (req, res) => {
   try {
     if (!req.file) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Harap unggah foto wajah." });
+      return res.status(400).json({ success: false, message: "Harap unggah foto wajah." });
     }
 
     let parsedFeatures = req.body.requestedFeatures;
@@ -18,9 +33,7 @@ exports.analyzeFace = async (req, res) => {
       }
     }
 
-    const validation = faceAnalysisSchema.safeParse({
-      requestedFeatures: parsedFeatures,
-    });
+    const validation = faceAnalysisSchema.safeParse({ requestedFeatures: parsedFeatures });
     if (!validation.success) {
       return res.status(400).json({
         success: false,
@@ -31,7 +44,7 @@ exports.analyzeFace = async (req, res) => {
     const result = await aiService.processFaceAnalysis(
       req.user.id,
       req.file,
-      validation.data.requestedFeatures,
+      validation.data.requestedFeatures
     );
 
     res.status(200).json({
@@ -39,7 +52,11 @@ exports.analyzeFace = async (req, res) => {
       message: result.kualitas_ok
         ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}).`
         : `Kualitas foto kurang baik: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong.`,
-      data: result.resultTx,
+      data: {
+        record: result.resultTx,
+        hasil_analisis: result.hasil_analisis,
+        active_features: result.activeFeatures,
+      },
       usage_info: {
         tokens: result.total_tokens,
         cost_usd: result.realCostUsd,
@@ -53,5 +70,39 @@ exports.analyzeFace = async (req, res) => {
       success: false,
       message: error.message || "Gagal memproses AI.",
     });
+  }
+};
+
+exports.getAvailableFeatures = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const pricingList = await prisma.featurePricing.findMany({ orderBy: { featureCode: "asc" } });
+
+    let userPackage = null;
+    if (userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { active_package: true },
+      });
+      userPackage = user?.active_package || null;
+    }
+
+    const features = {};
+    for (const fp of pricingList) {
+      const col = FEATURE_GATE_MAP[fp.featureCode];
+      const globallyActive = fp.isActive;
+      const inPackage = userPackage ? !!userPackage[col] : false;
+      features[fp.featureCode] = {
+        namaFitur: fp.namaFitur,
+        koinCost: fp.koinCost,
+        globallyActive,
+        inPackage,
+        available: globallyActive && inPackage,
+      };
+    }
+
+    res.status(200).json({ success: true, data: features });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };

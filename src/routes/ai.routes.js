@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const { analyzeFace } = require("../controllers/ai.controller");
+const { analyzeFace, getAvailableFeatures } = require("../controllers/ai.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 const optimizeImage = require("../middleware/imageOptimizer.middleware");
 
@@ -114,6 +114,20 @@ const upload = multer({ storage: multer.memoryStorage() });
  *       401:
  *         description: Unauthorized
  */
+/**
+ * @swagger
+ * /v1/ai/features:
+ *   get:
+ *     summary: Status global fitur AI + ketersediaan di paket user
+ *     tags: [AI Analysis]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "Map fitur: { globallyActive, inPackage, available, koinCost }"
+ */
+router.get("/features", verifyToken, getAvailableFeatures);
+
 router.post("/analyze-face", verifyToken, upload.single("foto"), optimizeImage, analyzeFace);
 
 module.exports = router;

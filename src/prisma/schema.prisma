@@ -178,12 +178,16 @@ model SubscriptionPackage {
   jumlahKoin Int
   deskripsi  String
 
-  featStandardScan  Boolean @default(true)
-  featSymmetry      Boolean @default(false)
-  featAdvMapping    Boolean @default(false)
-  featVirtualTryOn  Boolean @default(false)
-  featHistory       Boolean @default(false)
-  featTrendAnalysis Boolean @default(false)
+  featStandardScan       Boolean @default(true)
+  featFaceHeatmap        Boolean @default(false)
+  featSymmetry           Boolean @default(false)
+  featAdvMapping         Boolean @default(false)
+  featHairAnalysis       Boolean @default(false)
+  featRiskAnalysis       Boolean @default(false)
+  featBarberInstructions Boolean @default(false)
+  featVirtualTryOn       Boolean @default(false)
+  featHistory            Boolean @default(false)
+  featTrendAnalysis      Boolean @default(false)
 
   // Model AI yang dipilih Admin saat membuat paket
   llmModelId    String?

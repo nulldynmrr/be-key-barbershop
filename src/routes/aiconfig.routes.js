@@ -10,6 +10,7 @@ const {
   toggleModelStatus,
   testConnection,
   getFeaturePricing,
+  getFeatureToggleMap,
   updateFeaturePrice,
   calculateIdealKoin,
 } = require("../controllers/aiconfig.controller");
@@ -263,6 +264,20 @@ router.get("/logs", getAiUsageLogs);
  *         description: Berhasil mengambil data pricing
  */
 router.get("/feature-pricing", getFeaturePricing);
+
+/**
+ * @swagger
+ * /v1/ai-config/feature-toggle:
+ *   get:
+ *     summary: Ambil map status global semua fitur AI (aktif/nonaktif oleh Admin)
+ *     tags: [AI Engine Control]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "{ STANDARD_SCAN: { id, namaFitur, isActive, koinCost }, ... }"
+ */
+router.get("/feature-toggle", getFeatureToggleMap);
 
 /**
  * @swagger
