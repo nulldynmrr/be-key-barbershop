@@ -3,9 +3,15 @@ const sharp = require("sharp");
 const { PrismaClient } = require("@prisma/client");
 const { decrypt } = require("../utils/encryption");
 const cache = require("../utils/memoryCache");
+const { reportSystemError } = require("./alert.service");
 
 const prisma = new PrismaClient();
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const COOLDOWN_MS = 5000;
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [2000, 5000, 10000];
+
+const userCooldownMap = new Map();
 
 const FEATURE_GATE_MAP = {
   STANDARD_SCAN:        "featStandardScan",
@@ -213,6 +219,22 @@ Kembalikan HANYA JSON murni sesuai template, tidak ada teks lain.`;
 };
 
 exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
+  const now = Date.now();
+  const lastRequest = userCooldownMap.get(userId);
+  if (lastRequest && now - lastRequest < COOLDOWN_MS) {
+    const err = new Error(`Terlalu cepat. Tunggu ${Math.ceil((COOLDOWN_MS - (now - lastRequest)) / 1000)} detik lagi.`);
+    err.statusCode = 429;
+    throw err;
+  }
+  userCooldownMap.set(userId, now);
+
+  if (userCooldownMap.size > 10000) {
+    const cutoff = now - COOLDOWN_MS * 2;
+    for (const [uid, ts] of userCooldownMap.entries()) {
+      if (ts < cutoff) userCooldownMap.delete(uid);
+    }
+  }
+
   if (file.size > MAX_FILE_SIZE) {
     let quality = 80;
     let compressedBuffer = await sharp(file.buffer).webp({ quality }).toBuffer();
@@ -338,24 +360,46 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
 
   const { systemInstruction, promptText } = buildDynamicPrompt(activeFeatures);
 
-  const maiaResponse = await axios.post(
-    `${configAi.baseUrl}/chat/completions`,
-    {
-      model: configAi.modelName,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemInstruction },
+  let maiaResponse;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      maiaResponse = await axios.post(
+        `${configAi.baseUrl}/chat/completions`,
         {
-          role: "user",
-          content: [
-            { type: "text", text: promptText },
-            { type: "image_url", image_url: { url: `data:${file.mimetype};base64,${imageBase64}` } },
+          model: configAi.modelName,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: systemInstruction },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: promptText },
+                { type: "image_url", image_url: { url: `data:${file.mimetype};base64,${imageBase64}` } },
+              ],
+            },
           ],
         },
-      ],
-    },
-    { headers: { Authorization: `Bearer ${decryptedApiKey}` } }
-  );
+        {
+          headers: { Authorization: `Bearer ${decryptedApiKey}` },
+          timeout: 120000,
+        }
+      );
+      break;
+    } catch (aiError) {
+      if (attempt === MAX_RETRIES) {
+        reportSystemError(
+          "AI_SERVICE",
+          `AI call gagal setelah ${MAX_RETRIES}x retry. Model: ${configAi.modelName}. Error: ${aiError.message}. User: ${userId}`,
+          "CRITICAL"
+        ).catch(() => {});
+
+        const err = new Error(`AI gagal merespons setelah ${MAX_RETRIES} percobaan. Silakan coba lagi nanti.`);
+        err.statusCode = 503;
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt - 1] || 5000));
+    }
+  }
 
   const hasil_analisis = JSON.parse(maiaResponse.data.choices[0].message.content);
   const { prompt_tokens = 0, completion_tokens = 0, total_tokens = 0 } = maiaResponse.data.usage || {};
@@ -387,6 +431,10 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
         output_tokens: completion_tokens,
         total_tokens,
         cost_usd: realCostUsd,
+        koin_charged: totalDipotong,
+        service_fee_koin: totalKoinFitur,
+        token_fee_koin: realKoinAi,
+        features_used: JSON.stringify(activeFeatures),
         user_id: userId,
         ai_generation_id: aiRecord?.id || null,
       },

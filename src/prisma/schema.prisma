@@ -73,6 +73,12 @@ model SystemApiLog {
   cost_usd       Decimal  @db.Decimal(10, 6)
   tgl_penggunaan DateTime @default(now())
 
+  // Tracking koin untuk perbandingan modal vs charge
+  koin_charged      Int     @default(0)   // Total koin dipotong dari user
+  service_fee_koin  Int     @default(0)   // Koin dari FeaturePricing (service fee)
+  token_fee_koin    Int     @default(0)   // Koin dari real token usage
+  features_used     String? @db.Text      // JSON array fitur yang aktif
+
   user_id          String?
   ai_generation_id String?
 

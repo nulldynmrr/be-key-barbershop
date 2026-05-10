@@ -206,19 +206,30 @@ exports.getAiUsageLogs = async (req, res, next) => {
       prisma.systemConfig.findUnique({ where: { id: 1 } }),
     ]);
 
-    const globalMultiplier = config?.globalMultiplier || 1.35;
+    const rateIdr = config?.baseRateUsdIdr || 16000;
     const formattedLogs = logs.map((log) => {
       const modalUsd = Number(log.cost_usd);
-      const chargeUsd = modalUsd * globalMultiplier;
-      const profitUsd = chargeUsd - modalUsd;
+      const modalIdr = modalUsd * rateIdr;
+
       return {
         id: log.id,
         timestamp: log.tgl_penggunaan,
         email_user: log.user?.email || "Unknown",
+        model: log.model_name,
         tokens_in_out: `${log.input_tokens} / ${log.output_tokens}`,
-        modal_api_usd: `$${modalUsd.toFixed(5)}`,
-        charge_user_usd: `$${chargeUsd.toFixed(5)}`,
-        profit_usd: `+$${profitUsd.toFixed(5)}`,
+        total_tokens: log.total_tokens,
+
+        // MODAL (cost admin ke provider AI)
+        modal_api_usd: `$${modalUsd.toFixed(6)}`,
+        modal_api_idr: `Rp ${Math.ceil(modalIdr).toLocaleString("id-ID")}`,
+
+        // CHARGE (koin yang dipotong dari user)
+        koin_charged: log.koin_charged,
+        service_fee_koin: log.service_fee_koin,
+        token_fee_koin: log.token_fee_koin,
+
+        // FITUR YANG DIPAKAI
+        features_used: log.features_used ? JSON.parse(log.features_used) : [],
       };
     });
 
@@ -313,26 +324,38 @@ exports.calculateIdealKoin = async (req, res, next) => {
 
     const activeModel = featVirtualTryOn && imageModel ? imageModel : llmModel;
 
-    let modalApiUsd = 0;
+    // Estimasi harga rata-rata per token USD berdasarkan model yang dipakai
+    let avgTokenCostUsd = 0;
     if (activeModel.pricingUnit === "IMAGE") {
-      const avgTokens = activeModel.avgTokensPerUse || 2000;
-      modalApiUsd = (avgTokens / 1_000_000) * (Number(activeModel.hargaInput1M) || 0)
-                  + (Number(activeModel.hargaPerImage) || 0);
+      avgTokenCostUsd = (Number(activeModel.hargaInput1M) || 0) / 1_000_000;
     } else {
-      const avgTokens = activeModel.avgTokensPerUse || 2000;
-      modalApiUsd = (avgTokens / 1_000_000) * ((Number(activeModel.hargaInput1M) + Number(activeModel.hargaOutput1M)) / 2);
+      avgTokenCostUsd = ((Number(activeModel.hargaInput1M) || 0) + (Number(activeModel.hargaOutput1M) || 0)) / 2 / 1_000_000;
+    }
+
+    // Hitung base token untuk fitur dasar
+    let totalEstimatedTokens = activeModel.avgTokensPerUse || 2000;
+
+    // Tambahkan estimasi ekstra token untuk setiap fitur lanjutan yang aktif
+    if (featSymmetry)           totalEstimatedTokens += 300;
+    if (featAdvMapping)         totalEstimatedTokens += 500;
+    if (featHairAnalysis)       totalEstimatedTokens += 400;
+    if (featRiskAnalysis)       totalEstimatedTokens += 250;
+    if (featBarberInstructions) totalEstimatedTokens += 250;
+    if (featFaceHeatmap)        totalEstimatedTokens += 300;
+    if (featTrendAnalysis)      totalEstimatedTokens += 400;
+
+    // Total HPP Modal API (USD)
+    let modalApiUsd = totalEstimatedTokens * avgTokenCostUsd;
+
+    // Tambah biaya generate gambar jika menggunakan model IMAGE
+    if (activeModel.pricingUnit === "IMAGE") {
+      modalApiUsd += (Number(activeModel.hargaPerImage) || 0);
     }
 
     let modalApiIdr = modalApiUsd * rateIdr;
 
-    if (featHistory)            modalApiIdr += 50;
-    if (featSymmetry)           modalApiIdr += 1000;
-    if (featAdvMapping)         modalApiIdr += 1000;
-    if (featHairAnalysis)       modalApiIdr += 800;
-    if (featRiskAnalysis)       modalApiIdr += 500;
-    if (featBarberInstructions) modalApiIdr += 500;
-    if (featFaceHeatmap)        modalApiIdr += 600;
-    if (featTrendAnalysis)      modalApiIdr += 1000;
+    // Tambah biaya storage (database) jika History aktif
+    if (featHistory) modalApiIdr += 50;
 
     const featureMap = {
       STANDARD_SCAN:        true,

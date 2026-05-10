@@ -12,12 +12,16 @@ const convertToDays = (value, unit) => {
 
 // Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
-  const { jumlahKoin, featVirtualTryOn, featHistory, llmModelId, imageModelId } = payload;
+  const {
+    jumlahKoin, featVirtualTryOn, featHistory, llmModelId, imageModelId,
+    featSymmetry, featAdvMapping,
+    featFaceHeatmap, featHairAnalysis, featRiskAnalysis, featBarberInstructions,
+  } = payload;
+  const featTrendAnalysis = payload.featTrendAnalysis || payload.featHairstyleTrend || false;
 
   const config = await prisma.systemConfig.findFirst();
   if (!config) throw new Error("Konfigurasi Sistem belum disetting!");
 
-  // Ambil model berdasarkan pilihan admin; fallback ke model aktif termurah jika belum dipilih
   const [selectedLlm, selectedImage] = await Promise.all([
     llmModelId
       ? prisma.aiModel.findUnique({ where: { id: llmModelId } })
@@ -30,33 +34,34 @@ const calculateLiveHPP = async (payload) => {
   if (!selectedLlm) throw new Error("Model LLM belum dipilih atau tidak ditemukan!");
 
   const effectiveRate = config.baseRateUsdIdr * (1 + config.inflationBuffer);
-
-  // Pilih model yang digunakan untuk menghitung biaya per aksi
   const modelToUse = featVirtualTryOn && selectedImage ? selectedImage : selectedLlm;
 
-  const tarifIn   = Number(modelToUse.hargaInput1M)  || 0;
-  const tarifOut  = Number(modelToUse.hargaOutput1M) || 0;
-  const avgTokens = modelToUse.avgTokensPerUse || 2000;
+  let avgTokenCostUsd = 0;
+  if (modelToUse.pricingUnit === "IMAGE") {
+    avgTokenCostUsd = (Number(modelToUse.hargaInput1M) || 0) / 1_000_000;
+  } else {
+    avgTokenCostUsd = ((Number(modelToUse.hargaInput1M) || 0) + (Number(modelToUse.hargaOutput1M) || 0)) / 2 / 1_000_000;
+  }
 
-  // IMAGE_GEN: input per /1M token + output flat per /image
-  // LLM: input & output per /1M token
-  const costPerActionUsd = modelToUse.pricingUnit === "IMAGE"
-    ? (avgTokens / 1_000_000) * tarifIn + (Number(modelToUse.hargaPerImage) || 0)
-    : (avgTokens / 1_000_000) * ((tarifIn + tarifOut) / 2);
+  let totalEstimatedTokens = modelToUse.avgTokensPerUse || 2000;
+  if (featSymmetry)           totalEstimatedTokens += 300;
+  if (featAdvMapping)         totalEstimatedTokens += 500;
+  if (featHairAnalysis)       totalEstimatedTokens += 400;
+  if (featRiskAnalysis)       totalEstimatedTokens += 250;
+  if (featBarberInstructions) totalEstimatedTokens += 250;
+  if (featFaceHeatmap)        totalEstimatedTokens += 300;
+  if (featTrendAnalysis)      totalEstimatedTokens += 400;
+
+  let costPerActionUsd = totalEstimatedTokens * avgTokenCostUsd;
+  if (modelToUse.pricingUnit === "IMAGE") {
+    costPerActionUsd += (Number(modelToUse.hargaPerImage) || 0);
+  }
 
   let costPerActionIdr = costPerActionUsd * effectiveRate;
-
-  // Extended History: tambah biaya storage ~Rp 50/aksi
   if (featHistory) costPerActionIdr += 50;
 
-  // Markup per fitur premium untuk membedakan HPP antar tier paket
-  if (payload.featSymmetry)      costPerActionIdr += 1000;
-  if (payload.featAdvMapping)    costPerActionIdr += 1000;
-  if (payload.featTrendAnalysis) costPerActionIdr += 1000;
-
-  // 1 Aksi = 10 Koin (COIN_SCALE)
-  const COIN_SCALE      = 10;
-  const estimasiAksi    = jumlahKoin / COIN_SCALE;
+  const COIN_SCALE   = 10;
+  const estimasiAksi = jumlahKoin / COIN_SCALE;
   const totalApiCostIdr = costPerActionIdr * estimasiAksi;
 
   const rawHppIdeal =
@@ -64,11 +69,13 @@ const calculateLiveHPP = async (payload) => {
     (1 - config.mdrPercentage);
 
   return {
-    estimasiModalApi: Math.ceil(totalApiCostIdr),
-    hppIdeal:         Math.ceil(rawHppIdeal),
-    estimasiAksi:     Math.floor(estimasiAksi),
-    modelLlm:         selectedLlm  ? { id: selectedLlm.id,   nama: selectedLlm.namaRouter }  : null,
-    modelImage:       selectedImage ? { id: selectedImage.id, nama: selectedImage.namaRouter } : null,
+    estimasiModalApi:       Math.ceil(totalApiCostIdr),
+    hppIdeal:               Math.ceil(rawHppIdeal),
+    estimasiAksi:           Math.floor(estimasiAksi),
+    estimasiTokenPerAksi:   totalEstimatedTokens,
+    costPerActionUsd:       costPerActionUsd,
+    modelLlm:   selectedLlm  ? { id: selectedLlm.id,   nama: selectedLlm.namaRouter }  : null,
+    modelImage: selectedImage ? { id: selectedImage.id, nama: selectedImage.namaRouter } : null,
   };
 };
 
@@ -137,12 +144,16 @@ const createNewPackage = async (validatedData) => {
       typeValue:        validatedData.typeValue,
       jumlahKoin:       validatedData.jumlahKoin,
       durationDays,
-      featStandardScan: validatedData.featStandardScan,
-      featSymmetry:     validatedData.featSymmetry,
-      featAdvMapping:   validatedData.featAdvMapping,
-      featVirtualTryOn: validatedData.featVirtualTryOn,
-      featHistory:      validatedData.featHistory,
-      featTrendAnalysis: validatedData.featTrendAnalysis,
+      featStandardScan:       validatedData.featStandardScan,
+      featFaceHeatmap:        validatedData.featFaceHeatmap        || false,
+      featSymmetry:           validatedData.featSymmetry            || false,
+      featAdvMapping:         validatedData.featAdvMapping          || false,
+      featHairAnalysis:       validatedData.featHairAnalysis        || false,
+      featRiskAnalysis:       validatedData.featRiskAnalysis        || false,
+      featBarberInstructions: validatedData.featBarberInstructions  || false,
+      featVirtualTryOn:       validatedData.featVirtualTryOn        || false,
+      featHistory:            validatedData.featHistory             || false,
+      featTrendAnalysis:      validatedData.featTrendAnalysis       || false,
       llmModelId:       validatedData.llmModelId   || null,
       imageModelId:     validatedData.imageModelId || null,
       hppIdeal:         validatedData.hppIdeal,

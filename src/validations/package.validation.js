@@ -1,16 +1,29 @@
 const { z } = require("zod");
 
-const basePackageSchema = z.object({
+const featureFields = {
+  featStandardScan: z.boolean().default(true),
+  featFaceHeatmap: z.boolean().default(false),
+  featSymmetry: z.boolean().default(false),
+  featAdvMapping: z.boolean().default(false),
+  featHairAnalysis: z.boolean().default(false),
+  featRiskAnalysis: z.boolean().default(false),
+  featBarberInstructions: z.boolean().default(false),
+  featVirtualTryOn: z.boolean().default(false),
+  featHistory: z.boolean().default(false),
+  featTrendAnalysis: z.boolean().default(false),
+  featHairstyleTrend: z.boolean().optional(),
+};
+
+const baseFields = {
   namaPaket: z.string().min(3, "Nama paket minimal 3 karakter"),
   deskripsi: z.string().optional(),
   typeValue: z.enum(["ONTIME", "SUBSCRIPTION"]),
   jumlahKoin: z.number().int().nonnegative().default(0),
 
-  featStandardScan: z.boolean().default(true),
-  featSymmetry: z.boolean().default(false),
-  featAdvMapping: z.boolean().default(false),
-  featVirtualTryOn: z.boolean().default(false),
-  featHistory: z.boolean().default(false),
+  ...featureFields,
+
+  llmModelId: z.string().optional().nullable(),
+  imageModelId: z.string().optional().nullable(),
 
   hppIdeal: z
     .number()
@@ -24,9 +37,19 @@ const basePackageSchema = z.object({
   hargaDiskon: z.number().positive().optional().nullable(),
   diskonMulai: z.string().datetime().optional().nullable(),
   diskonAkhir: z.string().datetime().optional().nullable(),
-});
+};
 
-const packageSchema = basePackageSchema
+const normalizeTrend = (data) => {
+  if (data.featHairstyleTrend && !data.featTrendAnalysis) {
+    data.featTrendAnalysis = data.featHairstyleTrend;
+  }
+  delete data.featHairstyleTrend;
+  return data;
+};
+
+const packageSchema = z
+  .object(baseFields)
+  .transform(normalizeTrend)
   .refine((data) => data.hargaNominal >= data.hppIdeal, {
     message: "FATAL: Harga Nominal di bawah HPP Ideal! Perusahaan bisa rugi.",
     path: ["hargaNominal"],
@@ -45,8 +68,10 @@ const packageSchema = basePackageSchema
     },
   );
 
-const updatePackageSchema = basePackageSchema
+const updatePackageSchema = z
+  .object(baseFields)
   .partial()
+  .transform(normalizeTrend)
   .refine(
     (data) => {
       if (data.hppIdeal !== undefined && data.hargaNominal !== undefined) {
