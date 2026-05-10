@@ -184,6 +184,16 @@ const getAllPackages = async (page = 1, limit = 10) => {
       is_promo:     !!isPromoValid,
       berakhir_pada: isPromoValid ? pkg.diskonAkhir : null,
       status:       isPackageActive ? "AKTIF" : "NONAKTIF",
+      featStandardScan:       pkg.featStandardScan,
+      featSymmetry:           pkg.featSymmetry,
+      featAdvMapping:         pkg.featAdvMapping,
+      featFaceHeatmap:        pkg.featFaceHeatmap,
+      featHairAnalysis:       pkg.featHairAnalysis,
+      featRiskAnalysis:       pkg.featRiskAnalysis,
+      featTrendAnalysis:      pkg.featTrendAnalysis,
+      featBarberInstructions: pkg.featBarberInstructions,
+      featVirtualTryOn:       pkg.featVirtualTryOn,
+      featHistory:            pkg.featHistory,
     };
   });
 

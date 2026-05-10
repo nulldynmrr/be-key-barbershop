@@ -74,7 +74,7 @@ const deletePackage = async (req, res, next) => {
   try {
     const { id } = req.params;
     await packageService.deletePackageById(id);
-    cache.clear(); // Bersihkan cache
+    cache.clear();
     if (req.log) req.log.info({ packageId: id }, "Paket sukses dihapus");
     res.status(200).json({ success: true, message: "Paket berhasil dihapus" });
   } catch (error) {
