@@ -1,5 +1,5 @@
 const { faceAnalysisSchema } = require("../validations/ai.validation");
-const aiService = require("../services/ai.service");
+const aiService = require("../services/ai");
 const { PrismaClient } = require("@prisma/client");
 const cache = require("../utils/memoryCache");
 

@@ -16,16 +16,16 @@ const RETRY_DELAYS = [2000, 5000, 10000];
 const userCooldownMap = new Map();
 
 const FEATURE_GATE_MAP = {
-  STANDARD_SCAN:        "featStandardScan",
-  FACE_HEATMAP:         "featFaceHeatmap",
-  SYMMETRY:             "featSymmetry",
-  ADV_MAPPING:          "featAdvMapping",
-  HAIR_ANALYSIS:        "featHairAnalysis",
-  RISK_ANALYSIS:        "featRiskAnalysis",
-  BARBER_INSTRUCTIONS:  "featBarberInstructions",
-  VIRTUAL_TRY_ON:       "featVirtualTryOn",
-  HISTORY:              "featHistory",
-  TREND_ANALYSIS:       "featTrendAnalysis",
+  STANDARD_SCAN: "featStandardScan",
+  FACE_HEATMAP: "featFaceHeatmap",
+  SYMMETRY: "featSymmetry",
+  ADV_MAPPING: "featAdvMapping",
+  HAIR_ANALYSIS: "featHairAnalysis",
+  RISK_ANALYSIS: "featRiskAnalysis",
+  BARBER_INSTRUCTIONS: "featBarberInstructions",
+  VIRTUAL_TRY_ON: "featVirtualTryOn",
+  HISTORY: "featHistory",
+  TREND_ANALYSIS: "featTrendAnalysis",
 };
 
 const buildDynamicPrompt = (activeFeatures) => {
@@ -253,11 +253,11 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   }
 
   const [user, sysConfigFromDb, pricingListFromDb, configAiFromDb, configImageGenFromDb] = await Promise.all([
-    prisma.user.findUnique({ 
-      where: { id: userId }, 
-      include: { 
-        active_package: { include: { llmModel: true, imageModel: true } } 
-      } 
+    prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        active_package: { include: { llmModel: true, imageModel: true } }
+      }
     }),
     cache.get("sysConfig") ? null : prisma.systemConfig.findFirst(),
     cache.get("pricingList") ? null : prisma.featurePricing.findMany(),
@@ -308,7 +308,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     }
   }
 
-  const isFreeTrial = !userPackage.id;
+  const isFreeTrial = userPackage.namaPaket === "Free Trial";
 
   const globalStatus = {};
   for (const fp of pricingList) {
@@ -333,13 +333,12 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     // We silenty skip these so the backend doesn't throw "Access Denied", 
     // and the frontend can then show the "Blurred/Locked" UI for missing features.
     const premiumFeatures = [
-      "SYMMETRY", "FACE_HEATMAP", "ADV_MAPPING", 
-      "HAIR_ANALYSIS", "RISK_ANALYSIS", 
-      "BARBER_INSTRUCTIONS", "TREND_ANALYSIS",
-      "VIRTUAL_TRY_ON"
+      "SYMMETRY", "FACE_HEATMAP", "ADV_MAPPING",
+      "HAIR_ANALYSIS", "RISK_ANALYSIS",
+      "BARBER_INSTRUCTIONS", "TREND_ANALYSIS"
     ];
     if (isFreeTrial && premiumFeatures.includes(code)) {
-      continue; 
+      continue;
     }
 
     if (!userPackage[col]) {
@@ -443,7 +442,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
           "AI_SERVICE",
           `AI call gagal setelah ${MAX_RETRIES}x retry. Model: ${configAi.modelName}. Error: ${aiError.message}. User: ${userId}`,
           "CRITICAL"
-        ).catch(() => {});
+        ).catch(() => { });
 
         const err = new Error(`AI gagal merespons setelah ${MAX_RETRIES} percobaan. Silakan coba lagi nanti.`);
         err.statusCode = 503;
@@ -474,7 +473,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   if (activeFeatures.includes("VIRTUAL_TRY_ON") && configImageGen) {
     try {
       let limit = userPackage.virtualTryOnLimit > 0 ? userPackage.virtualTryOnLimit : 1;
-      
+
       // Explicitly force 1 image for Free Trial users only
       if (isFreeTrial) {
         limit = 1;
@@ -605,10 +604,10 @@ Output ONLY the final generated image. Make it look like a real photograph.`;
       };
 
       const results = await Promise.all(targets.map((target, idx) => generateImage(target, idx)));
-      
+
       generatedImageUrls = results.map(r => r.url);
       imageGenCostUsd = results.reduce((sum, r) => sum + r.cost, 0);
-      
+
     } catch (e) {
       console.error("Image Gen Overall Error:", e.message);
     }
@@ -622,7 +621,7 @@ Output ONLY the final generated image. Make it look like a real photograph.`;
     console.log(`[Image Gen Billing] cost_usd=${imageGenCostUsd}, cost_idr=${imageGenCostIdr.toFixed(2)}, koin=${imageGenKoin}, new_total=${totalDipotong}`);
   }
 
-  const mockTryOnImage = activeFeatures.includes("VIRTUAL_TRY_ON") 
+  const mockTryOnImage = activeFeatures.includes("VIRTUAL_TRY_ON")
     ? generatedImageUrls
     : null;
 
@@ -631,12 +630,12 @@ Output ONLY the final generated image. Make it look like a real photograph.`;
 
     if (saveToHistory) {
       aiRecord = await tx.aIGeneration.create({
-        data: { 
-          user_id: userId, 
-          url_foto_upload, 
+        data: {
+          user_id: userId,
+          url_foto_upload,
           url_hasil_img: mockTryOnImage,
-          hasil_analisis, 
-          harga_credit_terpakai: totalDipotong 
+          hasil_analisis,
+          harga_credit_terpakai: totalDipotong
         },
       });
     }
@@ -661,9 +660,9 @@ Output ONLY the final generated image. Make it look like a real photograph.`;
       await tx.systemApiLog.create({
         data: {
           model_name: configImageGen.modelName,
-          input_tokens: imageGenUsage.prompt_tokens || 1, // Fallback to 1 for image requests to prevent 0 token panic
-          output_tokens: imageGenUsage.completion_tokens || 1, // Fallback to 1
-          total_tokens: imageGenUsage.total_tokens || 2, // Fallback to 2
+          input_tokens: imageGenUsage.prompt_tokens || 1,
+          output_tokens: imageGenUsage.completion_tokens || 1,
+          total_tokens: imageGenUsage.total_tokens || 2,
           cost_usd: imageGenCostUsd,
           koin_charged: imageGenKoin,
           service_fee_koin: 0,
