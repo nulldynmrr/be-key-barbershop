@@ -7,7 +7,9 @@ const storage = multer.diskStorage({
         if (req.baseUrl.includes('ai')) uploadPath += 'ai_results/';
         else if (req.baseUrl.includes('barbers')) uploadPath += 'barbers/';
         else if (req.baseUrl.includes('gallery') || req.baseUrl.includes('services')) uploadPath += 'gallery/';
+        else if (req.baseUrl.includes('social-media')) uploadPath += 'social-media/';
         else uploadPath += 'profiles/';
+
 
         cb(null, uploadPath);
     },

@@ -20,12 +20,23 @@ exports.createSocialMedia = async (req, res) => {
       return res.status(400).json({ success: false, message: "Title dan link harus diisi" });
     }
 
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "Thumbnail wajib diunggah" });
+    }
+
+    const thumbnail = `/uploads/social-media/${req.file.filename}`;
+
+
     const newSocialMedia = await prisma.socialMedia.create({
       data: {
         title,
         link,
+        thumbnail,
       },
     });
+
+
+
 
     res.status(201).json({ success: true, data: newSocialMedia });
   } catch (error) {

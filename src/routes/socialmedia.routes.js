@@ -3,6 +3,9 @@ const router = express.Router();
 const socialMediaController = require("../controllers/socialmedia.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
+const upload = require("../utils/upload");
+const optimizeImage = require("../middleware/imageOptimizer.middleware");
+
 /**
  * @swagger
  * tags:
@@ -27,7 +30,7 @@ const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             required:
@@ -40,6 +43,9 @@ const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
  *               link:
  *                 type: string
  *                 example: "https://instagram.com/keybarber"
+ *               image:
+ *                 type: string
+ *                 format: binary
  *     responses:
  *       201:
  *         description: Social media berhasil ditambahkan
@@ -52,8 +58,11 @@ router.post(
   "/",
   verifyToken,
   isAdmin,
+  upload.single("image"),
+  optimizeImage,
   socialMediaController.createSocialMedia
 );
+
 
 /**
  * @swagger
