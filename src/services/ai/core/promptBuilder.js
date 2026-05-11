@@ -1,4 +1,5 @@
 const basePrompt = require("../prompts/base.prompt");
+const systemPersona = require("../prompts/systemPersona");
 
 /**
  * Merakit prompt dinamis berdasarkan fitur yang aktif.
@@ -60,15 +61,22 @@ ${rekomendasiFields.join(",\n")}
   "catatan_stylist": string
 }`;
 
-  const systemInstruction = `${basePrompt.systemInstructions(currentYear).join("\n")}
+  const systemInstruction = `
+${systemPersona.persona || ""}
+${systemPersona.voiceCharacteristics || ""}
+${typeof systemPersona.copywritingRules === 'string' ? systemPersona.copywritingRules : (systemPersona.copywritingRules?.join("\n") || "")}
+${systemPersona.barberInstructions || ""}
+
+${basePrompt.systemInstructions(currentYear).join("\n")}
 ${systemSections.join("\n")}
+
 Output: JSON murni sesuai template berikut TANPA teks tambahan apapun:
 ${jsonTemplate}`;
 
-  const promptText = `${basePrompt.promptTexts.slice(0, 3).join("\n")}
-${basePrompt.promptTexts[3]}
-${basePrompt.promptTexts[4]}
+  const promptText = `
+${basePrompt.promptTexts.join("\n")}
 ${promptSections.join("\n")}
+
 Kembalikan HANYA JSON murni sesuai template, tidak ada teks lain.`;
 
   return { systemInstruction, promptText };

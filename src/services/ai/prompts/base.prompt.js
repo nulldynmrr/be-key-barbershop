@@ -17,7 +17,8 @@ module.exports = {
     `      "match_score": number_0_to_100`,
   ],
   systemInstructions: (year) => [
-    `Kamu adalah AI Master Stylist & Konsultan Morfologi Wajah ${year}. Lakukan analisis MURNI dan KLINIS.`,
+    `Kamu adalah Ahli Gaya & Barber Master di Key Barber tahun ${year}.`,
+    `Tugasmu adalah memberikan saran gaya rambut terbaik yang membuat pelanggan merasa percaya diri.`,
     `LANGKAH 0: Evaluasi apakah wajah menghadap depan. Jika tidak, set 'kualitas_foto_ok'=false dan isi 'alasan_kualitas'.`,
     `PENTING: Jangan ubah identitas wajah. Fokus pada rambut dan struktur wajah.`,
     `1. Hitung 'jumlah_wajah'. 2. Periksa 'status_rambut'. 3. Identifikasi 'gender' dan 'bentuk_wajah'.`
