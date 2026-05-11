@@ -4,6 +4,8 @@ const { PrismaClient } = require("@prisma/client");
 const { decrypt } = require("../utils/encryption");
 const cache = require("../utils/memoryCache");
 const { reportSystemError } = require("./alert.service");
+const fs = require("fs");
+const path = require("path");
 
 const prisma = new PrismaClient();
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -250,16 +252,23 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     file.originalname = file.originalname.replace(/\.[^.]+$/, ".webp");
   }
 
-  const [user, sysConfigFromDb, pricingListFromDb, configAiFromDb] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId }, include: { active_package: true } }),
+  const [user, sysConfigFromDb, pricingListFromDb, configAiFromDb, configImageGenFromDb] = await Promise.all([
+    prisma.user.findUnique({ 
+      where: { id: userId }, 
+      include: { 
+        active_package: { include: { llmModel: true, imageModel: true } } 
+      } 
+    }),
     cache.get("sysConfig") ? null : prisma.systemConfig.findFirst(),
     cache.get("pricingList") ? null : prisma.featurePricing.findMany(),
     cache.get("configAi") ? null : prisma.aiModel.findFirst({ where: { isActive: true, typeAi: "LLM" } }),
+    prisma.aiModel.findFirst({ where: { isActive: true, typeAi: "IMAGE" } })
   ]);
 
   const sysConfig = cache.get("sysConfig") || sysConfigFromDb;
   const pricingList = cache.get("pricingList") || pricingListFromDb;
-  const configAi = cache.get("configAi") || configAiFromDb;
+  const configAi = user?.active_package?.llmModel || cache.get("configAi") || configAiFromDb;
+  const configImageGen = user?.active_package?.imageModel || configImageGenFromDb;
 
   if (sysConfigFromDb) cache.set("sysConfig", sysConfig, 300);
   if (pricingListFromDb) cache.set("pricingList", pricingList, 300);
@@ -356,7 +365,15 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
 
   const decryptedApiKey = decrypt(configAi.apiKey);
   const imageBase64 = file.buffer.toString("base64");
-  const url_foto_upload = `/uploads/ai_results/${Date.now()}-${file.originalname.replace(/\s+/g, "-")}`;
+  const cleanName = file.originalname.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9.-]/g, "").substring(0, 50);
+  const url_foto_upload = `/uploads/ai_results/${Date.now()}-${cleanName}`;
+
+  const uploadDir = path.join(process.cwd(), "uploads", "ai_results");
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+  const filePath = path.join(process.cwd(), url_foto_upload);
+  fs.writeFileSync(filePath, file.buffer);
 
   const { systemInstruction, promptText } = buildDynamicPrompt(activeFeatures);
 
@@ -415,12 +432,62 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
 
   const saveToHistory = activeFeatures.includes("HISTORY");
 
+  let generatedImageUrl = url_foto_upload;
+  let imageGenCostUsd = 0;
+
+  if (activeFeatures.includes("VIRTUAL_TRY_ON") && configImageGen) {
+    try {
+      const tryOnConfig = hasil_analisis.try_on_config || {};
+      const targetStyle = tryOnConfig.gaya_target || hasil_analisis.rekomendasi_gaya?.[0]?.nama_gaya || "modern haircut";
+      const instruction = tryOnConfig.instruksi_detail || "High quality, photorealistic, professional lighting";
+      const prompt = `A highly realistic virtual try-on of a person with hairstyle: ${targetStyle}. ${instruction}. Maintain original face, just change the hair.`;
+
+      const imageResponse = await axios.post(
+        `${configImageGen.baseUrl}/images/generations`,
+        {
+          model: configImageGen.modelName,
+          prompt: prompt,
+          n: 1,
+          size: "1024x1024"
+        },
+        { headers: { Authorization: `Bearer ${decrypt(configImageGen.apiKey)}` } }
+      );
+      
+      if (imageResponse.data && imageResponse.data.data && imageResponse.data.data[0]) {
+        const responseData = imageResponse.data.data[0];
+        if (responseData.url) {
+          generatedImageUrl = responseData.url;
+          imageGenCostUsd = Number(configImageGen.hargaPerImage) || 0;
+        } else if (responseData.b64_json) {
+          const genFileName = `tryon-${Date.now()}-${cleanName}`;
+          const genFilePath = path.join(process.cwd(), "uploads", "ai_results", genFileName);
+          const buffer = Buffer.from(responseData.b64_json, "base64");
+          fs.writeFileSync(genFilePath, buffer);
+          generatedImageUrl = `/uploads/ai_results/${genFileName}`;
+          imageGenCostUsd = Number(configImageGen.hargaPerImage) || 0;
+        }
+      }
+    } catch (e) {
+      console.error("Image Gen Error:", e.response?.data || e.message);
+    }
+  }
+
+  const mockTryOnImage = activeFeatures.includes("VIRTUAL_TRY_ON") 
+    ? [generatedImageUrl] 
+    : null;
+
   const resultTx = await prisma.$transaction(async (tx) => {
     let aiRecord = null;
 
     if (saveToHistory) {
       aiRecord = await tx.aIGeneration.create({
-        data: { user_id: userId, url_foto_upload, hasil_analisis, harga_credit_terpakai: totalDipotong },
+        data: { 
+          user_id: userId, 
+          url_foto_upload, 
+          url_hasil_img: mockTryOnImage,
+          hasil_analisis, 
+          harga_credit_terpakai: totalDipotong 
+        },
       });
     }
 
@@ -439,6 +506,24 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
         ai_generation_id: aiRecord?.id || null,
       },
     });
+
+    if (imageGenCostUsd > 0 && configImageGen) {
+      await tx.systemApiLog.create({
+        data: {
+          model_name: configImageGen.modelName,
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
+          cost_usd: imageGenCostUsd,
+          koin_charged: 0,
+          service_fee_koin: 0,
+          token_fee_koin: 0,
+          features_used: JSON.stringify(["VIRTUAL_TRY_ON"]),
+          user_id: userId,
+          ai_generation_id: aiRecord?.id || null,
+        },
+      });
+    }
 
     await tx.user.update({
       where: { id: userId },
@@ -459,5 +544,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     resultTx,
     total_tokens,
     realCostUsd,
+    url_foto_upload,
+    url_hasil_img: mockTryOnImage,
   };
 };

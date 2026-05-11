@@ -73,11 +73,10 @@ model SystemApiLog {
   cost_usd       Decimal  @db.Decimal(10, 6)
   tgl_penggunaan DateTime @default(now())
 
-  // Tracking koin untuk perbandingan modal vs charge
-  koin_charged      Int     @default(0)   // Total koin dipotong dari user
-  service_fee_koin  Int     @default(0)   // Koin dari FeaturePricing (service fee)
-  token_fee_koin    Int     @default(0)   // Koin dari real token usage
-  features_used     String? @db.Text      // JSON array fitur yang aktif
+  koin_charged      Int     @default(0)
+  service_fee_koin  Int     @default(0)
+  token_fee_koin    Int     @default(0)
+  features_used     String? @db.Text
 
   user_id          String?
   ai_generation_id String?
@@ -124,8 +123,8 @@ model AiModel {
   baseUrl         String
   modelName       String
   apiKey          String
-  typeAi          String  // 'LLM' | 'IMAGE_GEN'
-  pricingUnit     String  @default("TOKEN") // 'TOKEN' | 'IMAGE'
+  typeAi          String  
+  pricingUnit     String  @default("TOKEN") 
   hargaInput1M    Float   @default(0)
   hargaOutput1M   Float   @default(0)
   hargaPerImage   Float   @default(0)
@@ -144,17 +143,17 @@ model Feedback {
   user      User     @relation(fields: [user_id], references: [id])
   subject   String
   message   String   @db.Text
-  status    String   @default("pending") // pending, resolved
+  status    String   @default("pending")
   createdAt DateTime @default(now())
 }
 
 model SystemConfig {
-  id               Int      @id @default(1) // Singleton pattern
+  id               Int      @id @default(1)
   globalMultiplier Float    @default(1.35)
   baseRateUsdIdr   Float
   inflationBuffer  Float    @default(0.05)
   adminFeeFixed    Float    @default(4500.0)
-  mdrPercentage    Float    @default(0.007) // 0.7% default QRIS
+  mdrPercentage    Float    @default(0.007)
   updatedAt        DateTime @updatedAt
 }
 
@@ -195,7 +194,6 @@ model SubscriptionPackage {
   featHistory            Boolean @default(false)
   featTrendAnalysis      Boolean @default(false)
 
-  // Model AI yang dipilih Admin saat membuat paket
   llmModelId    String?
   imageModelId  String?
   llmModel      AiModel? @relation("LlmModel",   fields: [llmModelId],   references: [id])
@@ -229,8 +227,8 @@ model FeaturePricing {
 
 model Notification {
   id              String   @id @default(uuid())
-  type            String   // Contoh: "INFO", "WARNING", "CRITICAL"
-  source          String   // Contoh: "AI_BUDGET", "SYSTEM", "USER_ACTIVITY"
+  type            String   
+  source          String   
   title           String   @db.VarChar(255)
   message         String   @db.Text
   is_read         Boolean  @default(false)

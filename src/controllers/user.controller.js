@@ -3,6 +3,7 @@ const prisma = new PrismaClient();
 
 const getProfile = async (req, res, next) => {
   try {
+    console.log("Fetching profile for user:", req.user.id);
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: {
@@ -15,8 +16,15 @@ const getProfile = async (req, res, next) => {
         status_langganan: true,
         tgl_berakhir_langganan: true,
         createdAt: true,
+        active_package: {
+          select: {
+            namaPaket: true
+          }
+        }
       },
     });
+
+    console.log("Profile fetched:", user ? "Found" : "Not Found");
 
     if (!user) {
       const error = new Error("User tidak ditemukan");
@@ -26,6 +34,7 @@ const getProfile = async (req, res, next) => {
 
     res.status(200).json({ success: true, data: user });
   } catch (error) {
+    console.error("Error in getProfile:", error);
     next(error);
   }
 };

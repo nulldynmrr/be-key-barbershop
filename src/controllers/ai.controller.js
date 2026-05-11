@@ -53,7 +53,10 @@ exports.analyzeFace = async (req, res) => {
         ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}).`
         : `Kualitas foto kurang baik: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong.`,
       data: {
-        record: result.resultTx,
+        record: result.resultTx || {
+          url_foto_upload: result.url_foto_upload,
+          url_hasil_img: result.url_hasil_img
+        },
         hasil_analisis: result.hasil_analisis,
         active_features: result.activeFeatures,
       },
