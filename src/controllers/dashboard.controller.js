@@ -14,8 +14,10 @@ exports.getDashboardMain = async (req, res) => {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const calcTrend = (curr, past) => {
-      if (past === 0) return curr > 0 ? 100 : 0;
-      return Number((((curr - past) / past) * 100).toFixed(2));
+      if (curr <= past) return 0;
+      if (past === 0) return 100;
+      const trend = ((curr - past) / past) * 100;
+      return Number(trend.toFixed(2));
     };
 
     const detectPeriod = async () => {
@@ -152,12 +154,9 @@ exports.getDashboardMain = async (req, res) => {
     const isTokenCritical =
       maxTokensAllowed > 0 && tokensAvailable < maxTokensAllowed * 0.1;
 
-    const tokenTrendPercentage = calcTrend(
-      currentTokensUsedVal,
-      pastTokensUsedVal,
-    );
-    const displayTokenTrend =
-      pastTokensUsedVal > 0 ? -tokenTrendPercentage : tokenTrendPercentage;
+    const pastTokensAvailable = Math.max(0, maxTokensAllowed - pastTokensUsedVal);
+    const displayTokenTrend = calcTrend(tokensAvailable, pastTokensAvailable);
+    const tokenTrendDirection = tokensAvailable >= pastTokensAvailable ? "up" : "down";
 
     const transactionsLast30Days = await prisma.transaction.findMany({
       where: {
@@ -183,50 +182,63 @@ exports.getDashboardMain = async (req, res) => {
       total: groupedRevenue[date],
     }));
 
-    const recentGenerations = await prisma.aIGeneration.findMany({
-      take: 6,
-      orderBy: { tgl_generate: "desc" },
-      include: {
-        user: {
-          select: {
-            email: true,
-            sisa_credit: true,
-            tipe_akun: true,
-            _count: { select: { ai_generations: true } },
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const [totalGenerationsCount, recentGenerations] = await Promise.all([
+      prisma.aIGeneration.count(),
+      prisma.aIGeneration.findMany({
+        skip,
+        take: limit,
+        orderBy: { tgl_generate: "desc" },
+        include: {
+          user: {
+            select: {
+              email: true,
+              sisa_credit: true,
+              tipe_akun: true,
+              active_package_id: true,
+              active_package: { select: { namaPaket: true } },
+              _count: { select: { ai_generations: true } },
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
     const recentAnalysisTable = recentGenerations.map((gen) => ({
       email: gen.user?.email || "Unknown",
-      totalCredit: `${gen.user?.sisa_credit || 0} Credit`,
-      totalGenerate: `${gen.user?._count?.ai_generations || 0} Generate`,
-      status: String(gen.user?.tipe_akun || "free").toUpperCase(),
+      credit: `${gen.user?.sisa_credit || 0} Credit`,
+      generate: `${gen.user?._count?.ai_generations || 0} Generate`,
+      status: gen.user?.active_package?.namaPaket ? gen.user.active_package.namaPaket.toUpperCase() : "FREE",
     }));
 
-    const userGroupStats = await prisma.user.groupBy({
-      by: ["tipe_akun"],
-      _count: { id: true },
-      where: { role: "user" },
-    });
+    const [memberCount, guestCount] = await Promise.all([
+      prisma.user.count({ where: { active_package_id: { not: null } } }),
+      prisma.user.count({ where: { active_package_id: null } }),
+    ]);
 
-    const totalUserCount = userGroupStats.reduce(
-      (acc, curr) => acc + curr._count.id,
-      0,
-    );
-
-    const userStatsChart = userGroupStats.map((stat) => {
-      const labelMap = { free: "Guest", premium: "Premium", vip: "VIP" };
-      return {
-        label: labelMap[stat.tipe_akun] || "Lainnya",
-        count: stat._count.id,
-        percentage:
-          totalUserCount > 0
-            ? Number(((stat._count.id / totalUserCount) * 100).toFixed(0))
-            : 0,
-      };
-    });
+    const totalStatsUsers = memberCount + guestCount;
+    const userStats = [];
+    
+    if (memberCount > 0) {
+      userStats.push({
+        label: "Member",
+        count: memberCount,
+        percentage: Number(((memberCount / totalStatsUsers) * 100).toFixed(1)),
+        color: "#4a1a1a",
+      });
+    }
+    
+    if (guestCount > 0) {
+      userStats.push({
+        label: "Guest",
+        count: guestCount,
+        percentage: Number(((guestCount / totalStatsUsers) * 100).toFixed(1)),
+        color: "#fbbf24",
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -258,8 +270,8 @@ exports.getDashboardMain = async (req, res) => {
           },
           sisaToken: {
             currentValue: tokensAvailable,
-            trendPercentage: Number(displayTokenTrend.toFixed(2)),
-            trendDirection: displayTokenTrend >= 0 ? "up" : "down",
+            trendPercentage: displayTokenTrend,
+            trendDirection: tokenTrendDirection,
             isCritical: isTokenCritical,
             trendLabel,
           },
@@ -267,7 +279,13 @@ exports.getDashboardMain = async (req, res) => {
         revenueChart: revenueChartData,
         aiModelsChart: aiModelStats,
         recentAnalysis: recentAnalysisTable,
-        userStatsChart,
+        recentAnalysisMeta: {
+          total: totalGenerationsCount,
+          page,
+          limit,
+          totalPages: Math.ceil(totalGenerationsCount / limit),
+        },
+        userStats: userStats,
       },
     });
   } catch (error) {

@@ -231,7 +231,14 @@ exports.getAiUsageLogs = async (req, res, next) => {
         skip,
         take: limit,
         orderBy: { tgl_penggunaan: "desc" },
-        include: { user: { select: { email: true } } },
+        include: {
+          user: {
+            select: {
+              email: true,
+              active_package: { select: { namaPaket: true } },
+            },
+          },
+        },
       }),
       prisma.systemConfig.findUnique({ where: { id: 1 } }),
     ]);
@@ -243,12 +250,14 @@ exports.getAiUsageLogs = async (req, res, next) => {
       const profitUsd = chargeUsd - modalUsd;
       return {
         id: log.id,
-        timestamp: log.tgl_penggunaan,
-        email_user: log.user?.email || "Unknown",
-        tokens_in_out: `${log.input_tokens} / ${log.output_tokens}`,
-        modal_api_usd: `$${modalUsd.toFixed(5)}`,
-        charge_user_usd: `$${chargeUsd.toFixed(5)}`,
-        profit_usd: `+$${profitUsd.toFixed(5)}`,
+        createdAt: log.tgl_penggunaan,
+        userEmail: log.user?.email || "Guest",
+        userStatus: log.user?.active_package?.namaPaket ? log.user.active_package.namaPaket.toUpperCase() : "FREE",
+        promptTokens: log.input_tokens,
+        completionTokens: log.output_tokens,
+        modalApi: modalUsd.toFixed(5),
+        chargeUser: chargeUsd.toFixed(5),
+        profit: profitUsd.toFixed(5),
       };
     });
 

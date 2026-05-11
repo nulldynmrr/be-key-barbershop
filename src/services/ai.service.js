@@ -280,13 +280,35 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     throw err;
   }
 
-  if (!user || !user.active_package) {
-    const err = new Error("Anda belum memiliki paket aktif. Silakan beli paket terlebih dahulu.");
-    err.statusCode = 403;
-    throw err;
+  let userPackage = user?.active_package;
+
+  if (!userPackage) {
+    // If user is FREE and still has their initial credits (at least 1), allow a one-time "Free Trial"
+    if (user && user.tipe_akun === 'free' && user.sisa_credit > 0) {
+      userPackage = {
+        namaPaket: "Free Trial",
+        featStandardScan: true,
+        featFaceHeatmap: false,
+        featSymmetry: false,
+        featAdvMapping: false,
+        featHairAnalysis: false,
+        featRiskAnalysis: false,
+        featBarberInstructions: false,
+        featVirtualTryOn: true,
+        virtualTryOnLimit: 1,
+        featHistory: true,
+        featTrendAnalysis: false,
+        hargaNominal: 750, // Approx 250 per koin
+        jumlahKoin: 3,
+      };
+    } else {
+      const err = new Error("Anda belum memiliki paket aktif. Silakan beli paket terlebih dahulu.");
+      err.statusCode = 403;
+      throw err;
+    }
   }
 
-  const userPackage = user.active_package;
+  const isFreeTrial = !userPackage.id;
 
   const globalStatus = {};
   for (const fp of pricingList) {
@@ -306,6 +328,19 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     }
 
     if (globalStatus[code] === false) continue;
+
+    // HARD OVERRIDE FOR FREE TRIAL USERS: Lock premium biometric and detailed features
+    // We silenty skip these so the backend doesn't throw "Access Denied", 
+    // and the frontend can then show the "Blurred/Locked" UI for missing features.
+    const premiumFeatures = [
+      "SYMMETRY", "FACE_HEATMAP", "ADV_MAPPING", 
+      "HAIR_ANALYSIS", "RISK_ANALYSIS", 
+      "BARBER_INSTRUCTIONS", "TREND_ANALYSIS",
+      "VIRTUAL_TRY_ON"
+    ];
+    if (isFreeTrial && premiumFeatures.includes(code)) {
+      continue; 
+    }
 
     if (!userPackage[col]) {
       deniedByPackage.push(code);
@@ -355,7 +390,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
   const estKoinAi = Math.ceil(estCostIdr / hargaPerKoinIdr);
   const minKoinRequired = totalKoinFitur + estKoinAi;
 
-  if (user.sisa_credit < minKoinRequired) {
+  if (!isFreeTrial && user.sisa_credit < minKoinRequired) {
     const err = new Error(
       `Credit tidak mencukupi. Estimasi butuh ${minKoinRequired} koin (Fitur: ${totalKoinFitur}, Token AI: ${estKoinAi}). Sisa: ${user.sisa_credit}.`
     );
@@ -438,7 +473,12 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
 
   if (activeFeatures.includes("VIRTUAL_TRY_ON") && configImageGen) {
     try {
-      const limit = userPackage.virtualTryOnLimit > 0 ? userPackage.virtualTryOnLimit : 1;
+      let limit = userPackage.virtualTryOnLimit > 0 ? userPackage.virtualTryOnLimit : 1;
+      
+      // Explicitly force 1 image for Free Trial users only
+      if (isFreeTrial) {
+        limit = 1;
+      }
       const rekomendasiGaya = hasil_analisis.rekomendasi_gaya || [];
       const targets = rekomendasiGaya.slice(0, limit).map(r => r.nama_gaya);
       if (targets.length === 0) {
@@ -635,9 +675,13 @@ Output ONLY the final generated image. Make it look like a real photograph.`;
       });
     }
 
+    // Deduct credits. For Free Trial, we just use up all their initial coins (usually 3) 
+    // to prevent them from trying again, but we don't make them go negative.
+    const amountToDeduct = isFreeTrial ? user.sisa_credit : totalDipotong;
+
     await tx.user.update({
       where: { id: userId },
-      data: { sisa_credit: { decrement: totalDipotong } },
+      data: { sisa_credit: { decrement: amountToDeduct } },
     });
 
     return aiRecord;
