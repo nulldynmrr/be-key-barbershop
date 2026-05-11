@@ -191,6 +191,7 @@ model SubscriptionPackage {
   featRiskAnalysis       Boolean @default(false)
   featBarberInstructions Boolean @default(false)
   featVirtualTryOn       Boolean @default(false)
+  virtualTryOnLimit      Int     @default(1)
   featHistory            Boolean @default(false)
   featTrendAnalysis      Boolean @default(false)
 

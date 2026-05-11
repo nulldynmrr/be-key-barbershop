@@ -13,7 +13,7 @@ const convertToDays = (value, unit) => {
 // Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
   const {
-    jumlahKoin, featVirtualTryOn, featHistory, llmModelId, imageModelId,
+    jumlahKoin, featVirtualTryOn, virtualTryOnLimit = 1, featHistory, llmModelId, imageModelId,
     featSymmetry, featAdvMapping,
     featFaceHeatmap, featHairAnalysis, featRiskAnalysis, featBarberInstructions,
     typeValue,
@@ -53,11 +53,12 @@ const calculateLiveHPP = async (payload) => {
 
   // === 2. HITUNG COST IMAGE GEN (Jika Aktif) ===
   if (featVirtualTryOn && selectedImage) {
-    costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0);
+    const limit = virtualTryOnLimit > 0 ? virtualTryOnLimit : 1;
+    costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0) * limit;
     
     let imageTokenCost = (Number(selectedImage.hargaInput1M) || 0) / 1_000_000;
     let imageTokens = selectedImage.avgTokensPerUse || 0;
-    costPerActionUsd += (imageTokens * imageTokenCost);
+    costPerActionUsd += (imageTokens * imageTokenCost) * limit;
   }
 
   let costPerActionIdr = costPerActionUsd * effectiveRate;
@@ -193,6 +194,7 @@ const getAllPackages = async (page = 1, limit = 10) => {
       featTrendAnalysis:      pkg.featTrendAnalysis,
       featBarberInstructions: pkg.featBarberInstructions,
       featVirtualTryOn:       pkg.featVirtualTryOn,
+      virtualTryOnLimit:      pkg.virtualTryOnLimit,
       featHistory:            pkg.featHistory,
     };
   });
@@ -225,6 +227,7 @@ const createNewPackage = async (validatedData) => {
       featRiskAnalysis:       validatedData.featRiskAnalysis        || false,
       featBarberInstructions: validatedData.featBarberInstructions  || false,
       featVirtualTryOn:       validatedData.featVirtualTryOn        || false,
+      virtualTryOnLimit:      validatedData.virtualTryOnLimit       || 1,
       featHistory:            validatedData.featHistory             || false,
       featTrendAnalysis:      validatedData.featTrendAnalysis       || false,
       llmModelId:       validatedData.llmModelId   || null,

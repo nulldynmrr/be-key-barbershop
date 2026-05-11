@@ -50,7 +50,7 @@ exports.analyzeFace = async (req, res) => {
     res.status(200).json({
       success: true,
       message: result.kualitas_ok
-        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}).`
+        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}${result.imageGenKoin ? `, Image Gen: ${result.imageGenKoin}` : ''}).`
         : `Kualitas foto kurang baik: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong.`,
       data: {
         record: result.resultTx || {
@@ -65,6 +65,7 @@ exports.analyzeFace = async (req, res) => {
         cost_usd: result.realCostUsd,
         service_fee: result.totalKoinFitur,
         token_fee: result.realKoinAi,
+        image_gen_fee: result.imageGenKoin || 0,
       },
     });
   } catch (error) {

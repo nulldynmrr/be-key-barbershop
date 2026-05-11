@@ -184,7 +184,7 @@ const buildDynamicPrompt = (activeFeatures) => {
       `  "try_on_config": {"gaya_target":string,"instruksi_detail":string,"warna_rambut_saran":string,"estimasi_panjang":string}`
     );
     systemSections.push(
-      `- Siapkan konfigurasi virtual try-on: gaya target terbaik, instruksi teknis styling rinci, saran warna rambut paling cocok, dan estimasi panjang rambut.`
+      `- Siapkan konfigurasi virtual try-on: gaya target terbaik, instruksi teknis styling rinci, saran warna rambut paling cocok, dan estimasi panjang rambut. PENTING: Dalam 'instruksi_detail', sertakan juga DESKRIPSI SANGAT DETAIL tentang wajah asli user (gender, bentuk wajah, warna kulit, fitur mata/hidung, pakaian, dan latar belakang) agar AI Image Generator dapat meniru wajah user semirip mungkin!`
     );
     promptSections.push(
       `- Isi 'try_on_config' dengan konfigurasi virtual try-on terbaik untuk wajah ini.`
@@ -262,7 +262,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     cache.get("sysConfig") ? null : prisma.systemConfig.findFirst(),
     cache.get("pricingList") ? null : prisma.featurePricing.findMany(),
     cache.get("configAi") ? null : prisma.aiModel.findFirst({ where: { isActive: true, typeAi: "LLM" } }),
-    prisma.aiModel.findFirst({ where: { isActive: true, typeAi: "IMAGE" } })
+    prisma.aiModel.findFirst({ where: { isActive: true, typeAi: { in: ["IMAGE", "IMAGE_GEN"] } } })
   ]);
 
   const sysConfig = cache.get("sysConfig") || sysConfigFromDb;
@@ -428,52 +428,162 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
 
   const realCostIdr = realCostUsd * rateIdr * multiplier;
   const realKoinAi = Math.ceil(realCostIdr / hargaPerKoinIdr);
-  const totalDipotong = totalKoinFitur + realKoinAi;
+  let totalDipotong = totalKoinFitur + realKoinAi;
 
   const saveToHistory = activeFeatures.includes("HISTORY");
 
-  let generatedImageUrl = url_foto_upload;
+  let generatedImageUrls = [];
   let imageGenCostUsd = 0;
+  let imageGenUsage = {};
 
   if (activeFeatures.includes("VIRTUAL_TRY_ON") && configImageGen) {
     try {
-      const tryOnConfig = hasil_analisis.try_on_config || {};
-      const targetStyle = tryOnConfig.gaya_target || hasil_analisis.rekomendasi_gaya?.[0]?.nama_gaya || "modern haircut";
-      const instruction = tryOnConfig.instruksi_detail || "High quality, photorealistic, professional lighting";
-      const prompt = `A highly realistic virtual try-on of a person with hairstyle: ${targetStyle}. ${instruction}. Maintain original face, just change the hair.`;
-
-      const imageResponse = await axios.post(
-        `${configImageGen.baseUrl}/images/generations`,
-        {
-          model: configImageGen.modelName,
-          prompt: prompt,
-          n: 1,
-          size: "1024x1024"
-        },
-        { headers: { Authorization: `Bearer ${decrypt(configImageGen.apiKey)}` } }
-      );
-      
-      if (imageResponse.data && imageResponse.data.data && imageResponse.data.data[0]) {
-        const responseData = imageResponse.data.data[0];
-        if (responseData.url) {
-          generatedImageUrl = responseData.url;
-          imageGenCostUsd = Number(configImageGen.hargaPerImage) || 0;
-        } else if (responseData.b64_json) {
-          const genFileName = `tryon-${Date.now()}-${cleanName}`;
-          const genFilePath = path.join(process.cwd(), "uploads", "ai_results", genFileName);
-          const buffer = Buffer.from(responseData.b64_json, "base64");
-          fs.writeFileSync(genFilePath, buffer);
-          generatedImageUrl = `/uploads/ai_results/${genFileName}`;
-          imageGenCostUsd = Number(configImageGen.hargaPerImage) || 0;
-        }
+      const limit = userPackage.virtualTryOnLimit > 0 ? userPackage.virtualTryOnLimit : 1;
+      const rekomendasiGaya = hasil_analisis.rekomendasi_gaya || [];
+      const targets = rekomendasiGaya.slice(0, limit).map(r => r.nama_gaya);
+      if (targets.length === 0) {
+        targets.push(hasil_analisis.try_on_config?.gaya_target || "modern haircut");
       }
+
+      console.log(`[Image Gen] Generating ${targets.length} images in parallel...`);
+
+      const generateImage = async (targetStyle, index) => {
+        const editPrompt = `Perform a photorealistic image-to-image transformation.
+Task: Change the person's hairstyle to exactly match the "${targetStyle}" style.
+
+Crucial Requirements:
+1. NEW HAIRSTYLE: You must completely replace the current hair with the "${targetStyle}". The change must be OBVIOUS and DRAMATIC. Change the hair length, volume, texture, and silhouette to match the new style perfectly. Do not just return the original photo.
+2. SAME IDENTITY: The person's face (eyes, nose, mouth, jawline, skin tone) must remain 100% identical. It must look like the exact same person.
+3. SAME CONTEXT: Keep the clothing, background, and lighting identical to the original.
+
+Output ONLY the final generated image. Make it look like a real photograph.`;
+
+        try {
+          const imageEditResponse = await axios.post(
+            `${configImageGen.baseUrl}/chat/completions`,
+            {
+              model: configImageGen.modelName,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: editPrompt },
+                    { type: "image_url", image_url: { url: `data:${file.mimetype};base64,${imageBase64}` } },
+                  ],
+                },
+              ],
+              candidateCount: 1,
+              responseModalities: ["TEXT", "IMAGE"],
+              imageConfig: {
+                aspectRatio: "1:1",
+                imageSize: "1K"
+              }
+            },
+            {
+              headers: { Authorization: `Bearer ${decrypt(configImageGen.apiKey)}` },
+              timeout: 180000,
+            }
+          );
+
+          let extractedUrl = null;
+          let extractedCostUsd = 0;
+          const msg = imageEditResponse.data?.choices?.[0]?.message;
+
+          if (msg) {
+            let extractedBase64 = null;
+
+            if (msg.content && typeof msg.content === "string") {
+              const b64Match = msg.content.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+              if (b64Match) extractedBase64 = b64Match[1];
+            }
+            if (!extractedBase64 && Array.isArray(msg.images)) {
+              for (const img of msg.images) {
+                if (img.image_url && img.image_url.url) {
+                  const dataMatch = img.image_url.url.match(/data:image\/[^;]+;base64,(.+)/);
+                  if (dataMatch) {
+                    extractedBase64 = dataMatch[1];
+                    break;
+                  } else if (img.image_url.url.startsWith("http")) {
+                    extractedUrl = img.image_url.url;
+                    extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!extractedBase64 && Array.isArray(msg.content)) {
+              for (const part of msg.content) {
+                if (part.type === "image_url" && part.image_url?.url) {
+                  const dataMatch = part.image_url.url.match(/data:image\/[^;]+;base64,(.+)/);
+                  if (dataMatch) {
+                    extractedBase64 = dataMatch[1];
+                    break;
+                  } else if (part.image_url.url.startsWith("http")) {
+                    extractedUrl = part.image_url.url;
+                    extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!extractedBase64 && msg.content && typeof msg.content === "string") {
+              const rawB64 = msg.content.replace(/```[a-z]*\n?/g, "").replace(/\n/g, "").trim();
+              if (rawB64.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(rawB64.substring(0, 100))) {
+                extractedBase64 = rawB64;
+              }
+            }
+            if (!extractedBase64 && !extractedUrl && msg.content && typeof msg.content === "string") {
+              const mdImgMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+              if (mdImgMatch && mdImgMatch[1]) {
+                extractedUrl = mdImgMatch[1];
+                extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
+              } else {
+                const urlMatch = msg.content.match(/(https?:\/\/[^\s]+(?:png|jpe?g|webp|gif|avif)[^\s]*)/i);
+                if (urlMatch && urlMatch[1]) {
+                  extractedUrl = urlMatch[1];
+                  extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
+                }
+              }
+            }
+
+            if (extractedBase64) {
+              const genFileName = `tryon-${Date.now()}-${index}-${cleanName.replace(/\.[^.]+$/, "")}.webp`;
+              const genFilePath = path.join(process.cwd(), "uploads", "ai_results", genFileName);
+              const imgBuffer = Buffer.from(extractedBase64, "base64");
+              const webpBuffer = await sharp(imgBuffer).webp({ quality: 90 }).toBuffer();
+              fs.writeFileSync(genFilePath, webpBuffer);
+              extractedUrl = `/uploads/ai_results/${genFileName}`;
+              extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
+            }
+          }
+
+          return { url: extractedUrl || url_foto_upload, cost: extractedCostUsd, usage: imageEditResponse.data?.usage || {} };
+        } catch (e) {
+          console.error(`[Image Gen] Error for target '${targetStyle}':`, e.message);
+          return { url: url_foto_upload, cost: 0, usage: {} };
+        }
+      };
+
+      const results = await Promise.all(targets.map((target, idx) => generateImage(target, idx)));
+      
+      generatedImageUrls = results.map(r => r.url);
+      imageGenCostUsd = results.reduce((sum, r) => sum + r.cost, 0);
+      
     } catch (e) {
-      console.error("Image Gen Error:", e.response?.data || e.message);
+      console.error("Image Gen Overall Error:", e.message);
     }
   }
 
+  let imageGenKoin = 0;
+  if (imageGenCostUsd > 0) {
+    const imageGenCostIdr = imageGenCostUsd * rateIdr * multiplier;
+    imageGenKoin = Math.ceil(imageGenCostIdr / hargaPerKoinIdr);
+    totalDipotong += imageGenKoin;
+    console.log(`[Image Gen Billing] cost_usd=${imageGenCostUsd}, cost_idr=${imageGenCostIdr.toFixed(2)}, koin=${imageGenKoin}, new_total=${totalDipotong}`);
+  }
+
   const mockTryOnImage = activeFeatures.includes("VIRTUAL_TRY_ON") 
-    ? [generatedImageUrl] 
+    ? generatedImageUrls
     : null;
 
   const resultTx = await prisma.$transaction(async (tx) => {
@@ -498,7 +608,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
         output_tokens: completion_tokens,
         total_tokens,
         cost_usd: realCostUsd,
-        koin_charged: totalDipotong,
+        koin_charged: totalKoinFitur + realKoinAi,
         service_fee_koin: totalKoinFitur,
         token_fee_koin: realKoinAi,
         features_used: JSON.stringify(activeFeatures),
@@ -511,13 +621,13 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
       await tx.systemApiLog.create({
         data: {
           model_name: configImageGen.modelName,
-          input_tokens: 0,
-          output_tokens: 0,
-          total_tokens: 0,
+          input_tokens: imageGenUsage.prompt_tokens || 1, // Fallback to 1 for image requests to prevent 0 token panic
+          output_tokens: imageGenUsage.completion_tokens || 1, // Fallback to 1
+          total_tokens: imageGenUsage.total_tokens || 2, // Fallback to 2
           cost_usd: imageGenCostUsd,
-          koin_charged: 0,
+          koin_charged: imageGenKoin,
           service_fee_koin: 0,
-          token_fee_koin: 0,
+          token_fee_koin: imageGenKoin,
           features_used: JSON.stringify(["VIRTUAL_TRY_ON"]),
           user_id: userId,
           ai_generation_id: aiRecord?.id || null,
@@ -539,6 +649,7 @@ exports.processFaceAnalysis = async (userId, file, requestedFeatures) => {
     totalDipotong,
     totalKoinFitur,
     realKoinAi,
+    imageGenKoin,
     activeFeatures,
     hasil_analisis,
     resultTx,

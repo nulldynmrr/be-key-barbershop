@@ -9,6 +9,7 @@ const featureFields = {
   featRiskAnalysis: z.boolean().default(false),
   featBarberInstructions: z.boolean().default(false),
   featVirtualTryOn: z.boolean().default(false),
+  virtualTryOnLimit: z.number().int().min(1).max(5).default(1),
   featHistory: z.boolean().default(false),
   featTrendAnalysis: z.boolean().default(false),
   featHairstyleTrend: z.boolean().optional(),
