@@ -26,7 +26,9 @@ exports.sendOTP = async (email, otp) => {
   const currentYear = new Date().getFullYear();
   const mailOptions = {
     to: email,
-    subject: "Kode Verifikasi Key Barber Kamu",
+    subject: "[Key Barber] Kode Verifikasi Akun Anda",
+    text: `Gunakan kode keamanan berikut untuk mengakses akun Key Barber Anda:\n\n${otp}\n\nBerlaku selama 5 menit.`,
+    replyTo: "no-reply@keybarber.id",
     html: `
       <div style="background-color: #ffffff; padding: 40px 0; font-family: sans-serif;">
         <div style="max-width: 400px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">

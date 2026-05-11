@@ -299,6 +299,14 @@ exports.userLogin = async (req, res) => {
       });
     }
 
+    if (user.otp !== null) {
+      return res.status(403).json({
+        success: false,
+        message: "Akun belum diverifikasi. Silakan cek email Anda untuk kode OTP.",
+        needsVerification: true,
+      });
+    }
+
     if (!user.password) {
       return res.status(401).json({
         success: false,
@@ -382,6 +390,8 @@ exports.userRegister = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
     const newUser = await prisma.user.create({
       data: {
@@ -391,12 +401,17 @@ exports.userRegister = async (req, res) => {
         role: "user",
         tipe_akun: "free",
         sisa_credit: 3,
+        otp,
+        otpExpires,
       },
     });
 
-    const authToken = generateToken(newUser);
+    await mailService.sendOTP(email, otp);
 
-    res.status(201).json(buildAuthResponse("User dibuat", authToken, newUser));
+    res.status(201).json({
+      success: true,
+      message: "Registrasi berhasil, OTP telah dikirim",
+    });
   } catch (error) {
     res.status(500).json({
       success: false,
