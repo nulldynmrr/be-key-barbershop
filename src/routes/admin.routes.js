@@ -5,6 +5,10 @@ const {
   adjustCredit,
   updateUserStatus,
   deleteUser,
+  updateAdminProfile,
+  getAdminProfile,
+  getAuditLogs,
+  requestAdminOTP,
 } = require("../controllers/admin.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
@@ -137,5 +141,75 @@ router.patch("/users/:id/credit", adjustCredit);
  *         description: Status ban user berhasil diupdate
  */
 router.patch("/users/:id/status", updateUserStatus);
+
+/**
+ * @swagger
+ * /v1/admin/profile:
+ *   get:
+ *     summary: Ambil profil admin yang sedang login
+ *     tags: [Admin Management]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Berhasil mengambil profil admin
+ *   put:
+ *     summary: Edit profil admin (Nama & Password)
+ *     tags: [Admin Management]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               nama:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Profil admin berhasil diperbarui
+ */
+router.get("/profile", getAdminProfile);
+router.put("/profile", updateAdminProfile);
+
+/**
+ * @swagger
+ * /v1/admin/request-otp:
+ *   post:
+ *     summary: Request OTP untuk perubahan password admin
+ *     tags: [Admin Management]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: OTP berhasil dikirim ke email
+ */
+router.post("/request-otp", requestAdminOTP);
+
+/**
+ * @swagger
+ * /v1/admin/audit-logs:
+ *   get:
+ *     summary: Ambil daftar log aktivitas admin
+ *     tags: [Admin Management]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *     responses:
+ *       200:
+ *         description: Berhasil mengambil log aktivitas
+ */
+router.get("/audit-logs", getAuditLogs);
+
 
 module.exports = router;

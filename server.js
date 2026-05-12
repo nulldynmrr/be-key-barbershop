@@ -8,6 +8,9 @@ app.listen(PORT, () => {
     `✅ Backend Key Barber berhasil berjalan di http://localhost:${PORT}`,
   );
   console.log(
+    `📁 Akses dokumentasi API di http://localhost:${PORT}/api-docs`,
+  );
+  console.log(
     `📁 Akses gambar lokal aktif di http://localhost:${PORT}/uploads`,
   );
 });

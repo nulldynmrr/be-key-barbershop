@@ -1,7 +1,5 @@
-// src/routes/notification.routes.js
-
 const { Router } = require("express");
-const { getAdminAlerts } = require("../controllers/notification.controller");
+const { getAdminAlerts, getAllNotifications, markAsRead, markAllAsRead } = require("../controllers/notification.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 const router = Router();
@@ -97,5 +95,56 @@ const router = Router();
  *                   example: Internal server error
  */
 router.get("/alerts", verifyToken, isAdmin, getAdminAlerts);
+
+/**
+ * @swagger
+ * /v1/notifications:
+ *   get:
+ *     summary: Ambil daftar notifikasi
+ *     description: Digunakan untuk dropdown notification UI admin
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Berhasil mengambil notifikasi
+ */
+router.get("/", verifyToken, isAdmin, getAllNotifications);
+
+/**
+ * @swagger
+ * /v1/notifications/mark-all-read:
+ *   put:
+ *     summary: Tandai semua notifikasi menjadi terbaca
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Semua notifikasi berhasil ditandai terbaca
+ */
+router.put("/mark-all-read", verifyToken, isAdmin, markAllAsRead);
+
+/**
+ * @swagger
+ * /v1/notifications/{id}/read:
+ *   put:
+ *     summary: Tandai satu notifikasi menjadi terbaca
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID notifikasi
+ *     responses:
+ *       200:
+ *         description: Notifikasi berhasil ditandai terbaca
+ */
+router.put("/:id/read", verifyToken, isAdmin, markAsRead);
+
 
 module.exports = router;
