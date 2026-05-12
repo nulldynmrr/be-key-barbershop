@@ -456,3 +456,62 @@ exports.forgotPassword = async (req, res) => {
     });
   }
 };
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || String(user.otp) !== String(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP salah atau tidak valid",
+      });
+    }
+
+    if (new Date() > user.otpExpires) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP kadaluarsa, silakan request ulang",
+      });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password baru minimal 6 karakter",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { email },
+      data: {
+        password: hashedPassword,
+        otp: null,
+        otpExpires: null,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Password berhasil diubah. Silakan login dengan password baru.",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+exports.logout = async (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Berhasil logout",
+  });
+};

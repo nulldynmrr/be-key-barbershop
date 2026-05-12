@@ -60,7 +60,7 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
 
       try {
         const response = await axios.post(
-          `${configImageGen.baseUrl}/chat/completions`,
+          `${configImageGen.baseUrl}`,
           {
             model: configImageGen.modelName,
             messages: [

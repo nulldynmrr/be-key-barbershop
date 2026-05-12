@@ -40,6 +40,22 @@ model User {
 
   active_package_id      String?
   active_package         SubscriptionPackage? @relation(fields: [active_package_id], references: [id])
+  audit_logs             AuditLog[]
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  admin_id   String
+  action     String
+  target     String?
+  details    Json?
+  ip_address String?
+  userAgent  String?
+  created_at DateTime @default(now())
+
+  admin User @relation(fields: [admin_id], references: [id])
+
+  @@map("audit_logs")
 }
 
 model Transaction {

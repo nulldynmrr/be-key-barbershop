@@ -268,4 +268,45 @@ router.post("/request-otp", authController.requestOTP);
  */
 router.post("/verify-otp", authController.verifyOTP);
 
+/**
+ * @swagger
+ * /v1/auth/reset-password:
+ *   post:
+ *     summary: Reset password menggunakan OTP
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - otp
+ *               - newPassword
+ *             properties:
+ *               email:
+ *                 type: string
+ *               otp:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password berhasil diubah
+ */
+router.post("/reset-password", authController.resetPassword);
+
+/**
+ * @swagger
+ * /v1/auth/logout:
+ *   post:
+ *     summary: Logout user / admin
+ *     tags: [Auth]
+ *     responses:
+ *       200:
+ *         description: Berhasil logout
+ */
+router.post("/logout", authController.logout);
+
 module.exports = router;
