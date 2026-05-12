@@ -14,7 +14,7 @@ export const options = {
 };
 
 export default function () {
-  const adminToken = "ISI_TOKEN_ADMIN_KAMU_DI_SINI";
+  const adminToken = "";
 
   const params = {
     headers: {
