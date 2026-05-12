@@ -3,6 +3,7 @@ const cors = require("cors");
 const path = require("path");
 const morgan = require("morgan");
 const routes = require("./routes");
+const { errorHandler } = require("./middleware/errorHandler.middleware");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./config/swagger");
 
@@ -27,5 +28,7 @@ app.use((req, res) => {
     .status(404)
     .json({ success: false, message: "Endpoint API tidak ditemukan" });
 });
+
+app.use(errorHandler);
 
 module.exports = app;

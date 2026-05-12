@@ -1,7 +1,9 @@
-const { PrismaClient } = require("@prisma/client");
 const cache = require("../../utils/memoryCache");
 const fs = require("fs");
 const path = require("path");
+
+const crypto = require("crypto");
+const { reportSystemError } = require("../alert.service");
 
 const { checkRateLimit } = require("./utils/rateLimiter");
 const { compressImageIfNeeded } = require("./utils/imageProcessor");
@@ -10,7 +12,7 @@ const { callAiLLM } = require("./core/aiClient");
 const { generateVirtualTryOn } = require("./core/imageGenClient");
 const { estimateBilling, calculateRealBilling, calculateImageGenBilling } = require("./billing");
 
-const prisma = new PrismaClient();
+const prisma = require("../../config/prisma");
 
 const FEATURE_GATE_MAP = {
   STANDARD_SCAN:        "featStandardScan",
@@ -60,8 +62,15 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
   if (configAiFromDb) cache.set("configAi", configAi, 300);
 
   if (!configAi) {
-    const err = new Error("Konfigurasi AI belum diatur Admin.");
-    err.statusCode = 500;
+    reportSystemError(
+      "AI_ORCHESTRATOR",
+      "🚨 SERVICE DOWN: Tidak ada model AI (LLM) yang aktif! Ini bisa terjadi karena budget habis dan sistem menonaktifkan model otomatis. Segera aktifkan model di Dashboard.",
+      "CRITICAL"
+    ).catch(() => {});
+
+    const err = new Error("Layanan AI sedang dalam pemeliharaan. Tim kami sedang menanganinya.");
+    err.statusCode = 503;
+    err.errorCode = "SERVICE_UNAVAILABLE";
     throw err;
   }
 
@@ -135,6 +144,20 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
     throw err;
   }
 
+  // EARLY ABORT: Jika fitur VIRTUAL_TRY_ON diminta tapi tidak ada model Image Gen yang aktif
+  if (activeFeatures.includes("VIRTUAL_TRY_ON") && !configImageGen) {
+    reportSystemError(
+      "AI_ORCHESTRATOR",
+      "🚨 SERVICE DOWN: Fitur Virtual Try-On diminta, tetapi tidak ada model Image Gen yang aktif! Ini bisa terjadi karena budget provider habis.",
+      "CRITICAL"
+    ).catch(() => {});
+
+    const err = new Error("Layanan AI (Image Gen) sedang dalam pemeliharaan. Tim kami sedang menanganinya.");
+    err.statusCode = 503;
+    err.errorCode = "SERVICE_UNAVAILABLE";
+    throw err;
+  }
+
   if (!activeFeatures.includes("STANDARD_SCAN")) {
     if (globalStatus["STANDARD_SCAN"] === false) {
       const err = new Error("Fitur analisis dasar (STANDARD_SCAN) sedang dinonaktifkan oleh Admin.");
@@ -160,12 +183,28 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
   fs.writeFileSync(path.join(process.cwd(), url_foto_upload), file.buffer);
 
-  // 8. Build Prompt & Call LLM (modular)
-  const { systemInstruction, promptText } = buildDynamicPrompt(activeFeatures);
-  const aiRawResponse = await callAiLLM(configAi, systemInstruction, promptText, imageBase64, file.mimetype, userId);
+  // 8. Build Prompt & Call LLM (modular + local cache)
+  const imageFingerprint = crypto.createHash("sha256").update(file.buffer).digest("hex");
+  const cacheKey = `ai_result:${imageFingerprint}`;
   
-  const hasil_analisis = JSON.parse(aiRawResponse.choices[0].message.content);
-  const usage = aiRawResponse.usage || {};
+  let hasil_analisis;
+  let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+  const cachedResult = cache.get(cacheKey);
+
+  if (cachedResult) {
+    console.log(`[Cache Hit] Bypass LLM. Menggunakan hasil memori lokal untuk hash: ${imageFingerprint}`);
+    hasil_analisis = cachedResult;
+  } else {
+    const { systemInstruction, promptText } = buildDynamicPrompt(activeFeatures);
+    const aiRawResponse = await callAiLLM(configAi, systemInstruction, promptText, imageBase64, file.mimetype, userId);
+    
+    hasil_analisis = JSON.parse(aiRawResponse.choices[0].message.content);
+    usage = aiRawResponse.usage || usage;
+
+    // Simpan ke lokal memori selama 24 Jam (86400 detik)
+    cache.set(cacheKey, hasil_analisis, 86400); 
+  }
 
   // 9. Post-LLM Billing Calculation
   const realBilling = calculateRealBilling(usage, configAi, billingBase, billingBase.totalKoinFitur);
@@ -178,16 +217,27 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
   let imageGenKoin = 0;
 
   if (activeFeatures.includes("VIRTUAL_TRY_ON") && configImageGen) {
-    const tryOnResult = await generateVirtualTryOn(configImageGen, file, hasil_analisis, userPackage, isFreeTrial, cleanName, url_foto_upload);
-    generatedImageUrls = tryOnResult.generatedImageUrls;
-    imageGenCostUsd = tryOnResult.imageGenCostUsd;
-    imageGenUsage = tryOnResult.imageGenUsage;
+    console.log(`[Orchestrator] Starting Virtual Try-On for user ${userId}...`);
+    try {
+      const tryOnResult = await generateVirtualTryOn(configImageGen, file, hasil_analisis, userPackage, isFreeTrial, cleanName, url_foto_upload);
+      generatedImageUrls = tryOnResult.generatedImageUrls;
+      imageGenCostUsd = tryOnResult.imageGenCostUsd;
+      imageGenUsage = tryOnResult.imageGenUsage;
 
-    if (imageGenCostUsd > 0) {
-      const igBilling = calculateImageGenBilling(imageGenCostUsd, billingBase);
-      imageGenKoin = igBilling.imageGenKoin;
-      totalDipotong += imageGenKoin;
-      console.log(`[Image Gen Billing] cost_usd=${imageGenCostUsd}, cost_idr=${igBilling.imageGenCostIdr.toFixed(2)}, koin=${imageGenKoin}, new_total=${totalDipotong}`);
+      if (imageGenCostUsd > 0) {
+        const igBilling = calculateImageGenBilling(imageGenCostUsd, billingBase);
+        imageGenKoin = igBilling.imageGenKoin;
+        totalDipotong += imageGenKoin;
+        console.log(`[Image Gen Billing] cost_usd=${imageGenCostUsd}, cost_idr=${igBilling.imageGenCostIdr.toFixed(2)}, koin=${imageGenKoin}, new_total=${totalDipotong}`);
+      }
+    } catch (err) {
+      console.error(`[Orchestrator] Virtual Try-On Failed: ${err.message}`, { errorCode: err.errorCode, status: err.statusCode });
+      if (err.errorCode === "SERVICE_UNAVAILABLE" || err.statusCode === 503) {
+        console.log(`[Orchestrator] Re-throwing SERVICE_UNAVAILABLE to controller.`);
+        throw err;
+      }
+      // Silently fail for other errors but log them
+      console.warn(`[Orchestrator] Ignoring non-critical Image Gen error. Continuing with text analysis only.`);
     }
   }
 

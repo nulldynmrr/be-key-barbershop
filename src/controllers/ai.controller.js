@@ -1,9 +1,8 @@
 const { faceAnalysisSchema } = require("../validations/ai.validation");
 const aiService = require("../services/ai");
-const { PrismaClient } = require("@prisma/client");
 const cache = require("../utils/memoryCache");
 
-const prisma = new PrismaClient();
+const prisma = require("../config/prisma");
 
 const FEATURE_GATE_MAP = {
   STANDARD_SCAN:        "featStandardScan",
@@ -72,6 +71,7 @@ exports.analyzeFace = async (req, res) => {
     console.error("AI Controller Error:", error.message);
     res.status(error.statusCode || 500).json({
       success: false,
+      errorCode: error.errorCode || "GENERIC_ERROR",
       message: error.message || "Gagal memproses AI.",
     });
   }

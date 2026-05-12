@@ -1,10 +1,9 @@
 const axios = require("axios");
 const fs = require("fs");
-const { PrismaClient } = require("@prisma/client");
 const { decrypt, encrypt } = require("../utils/encryption");
 const cache = require("../utils/memoryCache");
 
-const prisma = new PrismaClient();
+const prisma = require("../config/prisma");
 
 exports.getExchangeSetting = async (req, res, next) => {
   try {

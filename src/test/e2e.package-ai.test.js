@@ -1,13 +1,12 @@
 const request = require("supertest");
 const app = require("../app");
-const { PrismaClient } = require("@prisma/client");
 const axios = require("axios");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 jest.mock("axios");
 
-const prisma = new PrismaClient();
+const prisma = require("../config/prisma");
 
 describe("E2E Integration: Admin Configuration & User AI Usage", () => {
   let adminToken = "";

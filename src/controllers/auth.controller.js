@@ -1,4 +1,3 @@
-const { PrismaClient } = require("@prisma/client");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const { OAuth2Client } = require("google-auth-library");
@@ -6,7 +5,7 @@ const { userRegisterSchema } = require("../validations/auth.validation");
 const mailService = require("../services/mail.service");
 const crypto = require("crypto");
 
-const prisma = new PrismaClient();
+const prisma = require("../config/prisma");
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (user) => {

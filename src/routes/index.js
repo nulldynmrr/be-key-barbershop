@@ -19,6 +19,7 @@ const packageRoutes = r(require("./package.routes"));
 const notificationRoutes = r(require("./notification.routes"));
 const socialMediaRoutes = r(require("./socialmedia.routes"));
 const galleryRoutes = r(require("./gallery.routes"));
+const waitlistRoutes = r(require("./waitlist.routes"));
 
 router.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 router.use("/auth", authRoutes);
@@ -35,5 +36,6 @@ router.use("/packages", packageRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/social-media", socialMediaRoutes);
 router.use("/gallery", galleryRoutes);
+router.use("/waitlist", waitlistRoutes);
 
 module.exports = router;

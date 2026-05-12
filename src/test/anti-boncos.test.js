@@ -1,13 +1,12 @@
 const request = require("supertest");
 const app = require("../app");
-const { PrismaClient } = require("@prisma/client");
 const axios = require("axios");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 jest.mock("axios");
 
-const prisma = new PrismaClient();
+const prisma = require("../config/prisma");
 
 // Helper: Mock AI response
 const mockAiSuccess = (tokens = { prompt_tokens: 2000, completion_tokens: 1000, total_tokens: 3000 }) => {

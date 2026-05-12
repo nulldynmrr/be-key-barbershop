@@ -250,3 +250,12 @@ model SocialMedia {
   updatedAt DateTime @updatedAt
 }
 
+model Waitlist {
+  id         String   @id @default(uuid())
+  email      String?
+  pesan      String   @db.Text
+  is_handled Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@map("waitlist")
+}
