@@ -16,7 +16,7 @@ const callAiLLM = async (configAi, systemInstruction, promptText, imageBase64, m
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       maiaResponse = await axios.post(
-        `${configAi.baseUrl}/chat/completions`,
+        `${configAi.baseUrl}`,
         {
           model: configAi.modelName,
           temperature: 0,
@@ -62,7 +62,7 @@ const callAiLLM = async (configAi, systemInstruction, promptText, imageBase64, m
           "LLM_BUDGET_EXCEEDED",
           `💸 Budget API LLM HABIS & Model Dinonaktifkan!\nModel: ${configAi.modelName}\nBudget provider: $${realMaxBudget || '?'}\n\n👉 Top-up sekarang: https://dash.maiarouter.ai/dashboard\n\nSetelah top-up, aktifkan kembali model di Dashboard > AI Config.`,
           "CRITICAL"
-        ).catch(() => {});
+        ).catch(() => { });
 
         const err = new Error(`Layanan AI sedang dalam pemeliharaan. Tim kami sedang menanganinya.`);
         err.statusCode = 503;
