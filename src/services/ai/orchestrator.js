@@ -175,13 +175,13 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
     throw err;
   }
 
-  // 7. Save Original Image
+  // 7. Save Original Image (Async)
   const imageBase64 = file.buffer.toString("base64");
   const cleanName = file.originalname.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9.-]/g, "").substring(0, 50);
   const url_foto_upload = `/uploads/ai_results/${Date.now()}-${cleanName}`;
   const uploadDir = path.join(process.cwd(), "uploads", "ai_results");
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-  fs.writeFileSync(path.join(process.cwd(), url_foto_upload), file.buffer);
+  await fs.promises.writeFile(path.join(process.cwd(), url_foto_upload), file.buffer);
 
   // 8. Build Prompt & Call LLM (modular + local cache)
   const imageFingerprint = crypto.createHash("sha256").update(file.buffer).digest("hex");
