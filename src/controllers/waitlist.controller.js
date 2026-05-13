@@ -8,7 +8,7 @@ const axios = require("axios");
  */
 exports.submitWaitlist = async (req, res) => {
   try {
-    const { pesan } = req.body;
+    const { pesan, phone } = req.body;
     const userId = req.user?.id;
 
     if (!pesan) {
@@ -32,7 +32,9 @@ exports.submitWaitlist = async (req, res) => {
     // Simpan ke DB
     const entry = await prisma.waitlist.create({
       data: {
+        userId: userId || null,
         email: userEmail,
+        phone: phone || null,
         pesan: pesan.trim(),
       },
     });
@@ -44,6 +46,7 @@ exports.submitWaitlist = async (req, res) => {
 
 <b>User:</b> ${userName}
 <b>Email:</b> ${userEmail ? `<code>${userEmail}</code>` : "<i>Tidak ada email (Guest)</i>"}
+<b>Phone (WA):</b> ${phone ? `<code>${phone}</code>` : "<i>Tidak ada nomor</i>"}
 <b>Waktu:</b> ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}
 
 <b>Pesan:</b>
@@ -130,6 +133,51 @@ exports.deleteWaitlist = async (req, res) => {
       where: { id: req.params.id },
     });
     res.status(200).json({ success: true, message: "Data berhasil dihapus." });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+/**
+ * GET /api/v1/waitlist/status
+ * Cek apakah user saat ini punya antrian yang belum ditangani.
+ */
+exports.checkStatus = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(200).json({ success: true, hasPending: false });
+    }
+
+    const pending = await prisma.waitlist.findFirst({
+      where: {
+        userId,
+        is_handled: false,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      hasPending: !!pending,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * GET /api/v1/waitlist/unhandled-count
+ * Ambil jumlah feedback yang belum ditangani.
+ */
+exports.getUnhandledCount = async (req, res) => {
+  try {
+    const count = await prisma.waitlist.count({
+      where: { is_handled: false },
+    });
+
+    res.status(200).json({
+      success: true,
+      count,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

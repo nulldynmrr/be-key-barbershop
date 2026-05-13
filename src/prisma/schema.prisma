@@ -269,7 +269,9 @@ model SocialMedia {
 
 model Waitlist {
   id         String   @id @default(uuid())
+  userId     String?
   email      String?
+  phone      String?
   pesan      String   @db.Text
   is_handled Boolean  @default(false)
   createdAt  DateTime @default(now())
