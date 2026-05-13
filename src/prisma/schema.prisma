@@ -181,6 +181,7 @@ enum PackageType {
 model CreditPackage {
   id           Int         @id @default(autoincrement())
   nama_paket   String
+  deskripsi    String?     @db.Text
   tipe_paket   PackageType @default(ONETIME)
   jumlah_koin  Int         @default(0)
   durasi_hari  Int?

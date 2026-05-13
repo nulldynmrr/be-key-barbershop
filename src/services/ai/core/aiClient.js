@@ -42,7 +42,7 @@ const callAiLLM = async (configAi, systemInstruction, promptText, imageBase64, m
       const errorBody = aiError.response?.data?.error || {};
       const errorMsg = errorBody.message || aiError.message;
 
-      // Deteksi budget habis -> sinkronisasi budget + matikan model + kirim alert CRITICAL
+      // Deteksi budget habis 
       if (errorBody.type === "budget_exceeded" || errorMsg.includes("Budget has been exceeded")) {
         const budgetMatch = errorMsg.match(/Max budget:\s*([\d.]+)/i);
         const realMaxBudget = budgetMatch ? parseFloat(budgetMatch[1]) : null;
@@ -71,9 +71,17 @@ const callAiLLM = async (configAi, systemInstruction, promptText, imageBase64, m
       }
 
       if (attempt === MAX_RETRIES) {
+        let userEmail = userId;
+        try {
+          const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+          if (user?.email) userEmail = user.email;
+        } catch (e) {
+          console.error("[aiClient] Failed to fetch user email:", e.message);
+        }
+
         reportSystemError(
           "AI_SERVICE",
-          `AI call gagal setelah ${MAX_RETRIES}x retry. Model: ${configAi.modelName}. Error: ${aiError.message}. User: ${userId}`,
+          `AI call gagal setelah ${MAX_RETRIES}x retry. Model: ${configAi.modelName}. Error: ${aiError.message}. User: ${userEmail}`,
           "CRITICAL"
         ).catch(() => { });
 

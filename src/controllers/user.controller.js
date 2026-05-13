@@ -118,4 +118,21 @@ const getTransactions = async (req, res, next) => {
   }
 };
 
-module.exports = { getProfile, updateProfile, getAiHistory, getTransactions };
+const resolveUserEmail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { email: true },
+    });
+
+    res.status(200).json({
+      success: true,
+      email: user?.email || "Guest",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+module.exports = { getProfile, updateProfile, getAiHistory, getTransactions, resolveUserEmail };

@@ -119,3 +119,18 @@ exports.markHandled = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+/**
+ * DELETE /api/v1/waitlist/:id (Admin only)
+ * Hapus data antrian.
+ */
+exports.deleteWaitlist = async (req, res) => {
+  try {
+    await prisma.waitlist.delete({
+      where: { id: req.params.id },
+    });
+    res.status(200).json({ success: true, message: "Data berhasil dihapus." });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

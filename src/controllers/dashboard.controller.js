@@ -185,32 +185,40 @@ exports.getDashboardMain = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const [totalGenerationsCount, recentGenerations] = await Promise.all([
-      prisma.aIGeneration.count(),
-      prisma.aIGeneration.findMany({
-        skip,
-        take: limit,
-        orderBy: { tgl_generate: "desc" },
-        include: {
-          user: {
-            select: {
-              email: true,
-              sisa_credit: true,
-              tipe_akun: true,
-              active_package_id: true,
-              active_package: { select: { namaPaket: true } },
-              _count: { select: { ai_generations: true } },
-            },
-          },
-        },
-      }),
-    ]);
+    // Menampilkan UNIQUE USER yang melakukan generate terbaru
+    const distinctUsers = await prisma.aIGeneration.groupBy({
+      by: ['user_id'],
+      _max: { tgl_generate: true },
+      orderBy: { _max: { tgl_generate: 'desc' } },
+      skip,
+      take: limit,
+    });
 
-    const recentAnalysisTable = recentGenerations.map((gen) => ({
-      email: gen.user?.email || "Unknown",
-      credit: `${gen.user?.sisa_credit || 0} Credit`,
-      generate: `${gen.user?._count?.ai_generations || 0} Generate`,
-      status: gen.user?.active_package?.namaPaket ? gen.user.active_package.namaPaket.toUpperCase() : "FREE",
+    // Hitung total unique users yang pernah generate untuk pagination
+    const totalUniqueUsersGroups = await prisma.aIGeneration.groupBy({
+      by: ['user_id'],
+    });
+    const totalGenerationsCount = totalUniqueUsersGroups.length;
+
+    const recentUsers = await Promise.all(
+      distinctUsers.map(async (d) => {
+        return await prisma.user.findUnique({
+          where: { id: d.user_id },
+          select: {
+            email: true,
+            sisa_credit: true,
+            active_package: { select: { namaPaket: true } },
+            _count: { select: { ai_generations: true } },
+          },
+        });
+      })
+    );
+
+    const recentAnalysisTable = recentUsers.map((u) => ({
+      email: u?.email || "Unknown",
+      credit: `${u?.sisa_credit || 0} Credit`,
+      generate: `${u?._count?.ai_generations || 0} Generate`,
+      status: u?.active_package?.namaPaket ? u.active_package.namaPaket.toUpperCase() : "FREE",
     }));
 
     const [memberCount, guestCount] = await Promise.all([
