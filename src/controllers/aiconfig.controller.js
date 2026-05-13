@@ -158,15 +158,7 @@ exports.toggleModelStatus = async (req, res, next) => {
     });
 
     if (!isActive) {
-      await prisma.subscriptionPackage.updateMany({
-        where: {
-          OR: [
-            { llmModelId: modelId },
-            { imageModelId: modelId }
-          ]
-        },
-        data: { status: "INAKTIF" }
-      });
+      // Logic manual nonaktifkan paket dihapus agar status bersifat cerdas/dinamis
     }
     res.status(200).json({
       success: true,

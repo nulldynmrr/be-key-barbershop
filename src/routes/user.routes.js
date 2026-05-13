@@ -4,6 +4,7 @@ const {
   updateProfile,
   getAiHistory,
   getTransactions,
+  resolveUserEmail,
 } = require("../controllers/user.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 
@@ -102,5 +103,6 @@ router.get("/ai-history", getAiHistory);
  *         description: Berhasil mengambil riwayat transaksi
  */
 router.get("/transactions", getTransactions);
+router.get("/:id/resolve-email", resolveUserEmail);
 
 module.exports = router;

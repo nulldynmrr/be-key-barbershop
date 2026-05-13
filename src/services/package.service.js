@@ -9,6 +9,48 @@ const convertToDays = (value, unit) => {
   }
 };
 
+/** Kebalikan convertToDays — untuk mengisi form edit admin */
+const durationDaysToForm = (durationDays) => {
+  if (!durationDays || durationDays <= 0) {
+    return { durasi_value: "30", durasi_unit: "HARI" };
+  }
+  if (durationDays >= 365 && durationDays % 365 === 0) {
+    return { durasi_value: String(durationDays / 365), durasi_unit: "TAHUN" };
+  }
+  if (durationDays >= 30 && durationDays % 30 === 0) {
+    return { durasi_value: String(durationDays / 30), durasi_unit: "BULAN" };
+  }
+  return { durasi_value: String(durationDays), durasi_unit: "HARI" };
+};
+
+/** Hanya field yang ada di model SubscriptionPackage — aman untuk Prisma update */
+const SUBSCRIPTION_PACKAGE_PRISMA_KEYS = new Set([
+  "namaPaket",
+  "deskripsi",
+  "typeValue",
+  "jumlahKoin",
+  "featStandardScan",
+  "featFaceHeatmap",
+  "featSymmetry",
+  "featAdvMapping",
+  "featHairAnalysis",
+  "featRiskAnalysis",
+  "featBarberInstructions",
+  "featVirtualTryOn",
+  "virtualTryOnLimit",
+  "featHistory",
+  "featTrendAnalysis",
+  "llmModelId",
+  "imageModelId",
+  "hppIdeal",
+  "hppBreakdown",
+  "hargaNominal",
+  "promoAktif",
+  "hargaDiskon",
+  "diskonMulai",
+  "diskonAkhir",
+]);
+
 // Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
   const {
@@ -160,12 +202,12 @@ const getAllPackages = async (page = 1, limit = 10) => {
     }
 
     let isPackageActive = true;
-    
+
     // Cek model LLM
     if (!pkg.llmModelId || !modelStatusMap[pkg.llmModelId]) {
       isPackageActive = false;
     }
-    
+
     // Cek model Image Gen (jika ada Virtual Try On)
     if (pkg.featVirtualTryOn) {
       if (!pkg.imageModelId || !modelStatusMap[pkg.imageModelId]) {
@@ -173,28 +215,47 @@ const getAllPackages = async (page = 1, limit = 10) => {
       }
     }
 
+    const durForm = durationDaysToForm(pkg.durationDays);
+
     return {
-      id:           pkg.id,
-      nama:         pkg.namaPaket,
-      tipe:         pkg.typeValue,
-      koin:         pkg.jumlahKoin,
-      durasi_text:  durasi_display,
-      harga_asli:   pkg.hargaNominal,
-      harga_bayar:  isPromoValid ? pkg.hargaDiskon : pkg.hargaNominal,
-      is_promo:     !!isPromoValid,
+      id: pkg.id,
+      nama: pkg.namaPaket,
+      tipe: pkg.typeValue,
+      koin: pkg.jumlahKoin,
+      durasi_text: durasi_display,
+      harga_asli: pkg.hargaNominal,
+      harga_bayar: isPromoValid ? pkg.hargaDiskon : pkg.hargaNominal,
+      is_promo: !!isPromoValid,
       berakhir_pada: isPromoValid ? pkg.diskonAkhir : null,
-      status:       isPackageActive ? "AKTIF" : "NONAKTIF",
-      featStandardScan:       pkg.featStandardScan,
-      featSymmetry:           pkg.featSymmetry,
-      featAdvMapping:         pkg.featAdvMapping,
-      featFaceHeatmap:        pkg.featFaceHeatmap,
-      featHairAnalysis:       pkg.featHairAnalysis,
-      featRiskAnalysis:       pkg.featRiskAnalysis,
-      featTrendAnalysis:      pkg.featTrendAnalysis,
+      /** Boleh dibeli (model AI OK) — dipakai guest / filter */
+      status: isPackageActive ? "AKTIF" : "NONAKTIF",
+      /** Status aktif/nonaktif paket di DB (toggle admin) */
+      dbStatus: pkg.status,
+      featStandardScan: pkg.featStandardScan,
+      featSymmetry: pkg.featSymmetry,
+      featAdvMapping: pkg.featAdvMapping,
+      featFaceHeatmap: pkg.featFaceHeatmap,
+      featHairAnalysis: pkg.featHairAnalysis,
+      featRiskAnalysis: pkg.featRiskAnalysis,
+      featTrendAnalysis: pkg.featTrendAnalysis,
+      featHairstyleTrend: pkg.featTrendAnalysis,
       featBarberInstructions: pkg.featBarberInstructions,
-      featVirtualTryOn:       pkg.featVirtualTryOn,
-      virtualTryOnLimit:      pkg.virtualTryOnLimit,
-      featHistory:            pkg.featHistory,
+      featVirtualTryOn: pkg.featVirtualTryOn,
+      virtualTryOnLimit: pkg.virtualTryOnLimit,
+      featHistory: pkg.featHistory,
+
+      deskripsi: pkg.deskripsi ?? "",
+      promoAktif: pkg.promoAktif,
+      hargaDiskon: pkg.hargaDiskon != null ? Number(pkg.hargaDiskon) : null,
+      diskonMulai: pkg.diskonMulai ? pkg.diskonMulai.toISOString() : null,
+      diskonAkhir: pkg.diskonAkhir ? pkg.diskonAkhir.toISOString() : null,
+      llmModelId: pkg.llmModelId,
+      imageModelId: pkg.imageModelId,
+      durationDays: pkg.durationDays,
+      durasi_value: durForm.durasi_value,
+      durasi_unit: durForm.durasi_unit,
+      hppIdeal: pkg.hppIdeal != null ? Number(pkg.hppIdeal) : null,
+      hppBreakdown: pkg.hppBreakdown,
     };
   });
 
@@ -253,16 +314,39 @@ const updatePackageById = async (id, validatedData) => {
   }
 
   let durationDays = existingPackage.durationDays;
-  if (validatedData.typeValue === "SUBSCRIPTION" && validatedData.durasi_value) {
-    durationDays = convertToDays(validatedData.durasi_value, validatedData.durasi_unit);
+  if (
+    validatedData.typeValue === "SUBSCRIPTION" &&
+    validatedData.durasi_value != null &&
+    validatedData.durasi_unit
+  ) {
+    durationDays = convertToDays(
+      Number(validatedData.durasi_value),
+      validatedData.durasi_unit,
+    );
+  } else if (validatedData.typeValue === "ONTIME") {
+    durationDays = null;
   }
 
-  const updateData = { ...validatedData };
-  delete updateData.durasi_value;
-  delete updateData.durasi_unit;
+  const updateData = {};
+  for (const key of Object.keys(validatedData)) {
+    if (!SUBSCRIPTION_PACKAGE_PRISMA_KEYS.has(key)) continue;
+    if (validatedData[key] === undefined) continue;
+    updateData[key] = validatedData[key];
+  }
 
-  if (updateData.diskonMulai) updateData.diskonMulai = new Date(updateData.diskonMulai);
-  if (updateData.diskonAkhir) updateData.diskonAkhir = new Date(updateData.diskonAkhir);
+  if (validatedData.promoAktif === false) {
+    updateData.promoAktif = false;
+    updateData.hargaDiskon = null;
+    updateData.diskonMulai = null;
+    updateData.diskonAkhir = null;
+  } else {
+    if (updateData.diskonMulai != null && updateData.diskonMulai !== "") {
+      updateData.diskonMulai = new Date(updateData.diskonMulai);
+    }
+    if (updateData.diskonAkhir != null && updateData.diskonAkhir !== "") {
+      updateData.diskonAkhir = new Date(updateData.diskonAkhir);
+    }
+  }
 
   return await prisma.subscriptionPackage.update({
     where: { id },
