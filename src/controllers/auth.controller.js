@@ -222,6 +222,12 @@ exports.guestLogin = async (req, res) => {
           sisa_credit: 1,
         },
       });
+    } else if (user.tipe_akun === "free" && user.sisa_credit <= 0) {
+      return res.status(403).json({
+        success: false,
+        errorCode: "TRIAL_EXHAUSTED",
+        message: "Your complimentary simulations have concluded.",
+      });
     }
 
     const authToken = generateToken(user);
