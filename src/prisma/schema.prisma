@@ -32,6 +32,8 @@ model User {
   otp                    String? 
   otpExpires             DateTime?
   is_banned              Boolean        @default(false)
+  agreed_to_terms        Boolean        @default(false)
+  agreed_at             DateTime?
   createdAt              DateTime       @default(now())
   transactions           Transaction[]
   ai_generations         AIGeneration[]

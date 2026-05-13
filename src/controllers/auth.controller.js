@@ -86,6 +86,8 @@ exports.googleLogin = async (req, res) => {
           role: "user",
           tipe_akun: "free",
           sisa_credit: 3,
+          agreed_to_terms: true,
+          agreed_at: new Date(),
         },
       });
     }
@@ -402,6 +404,8 @@ exports.userRegister = async (req, res) => {
         sisa_credit: 3,
         otp,
         otpExpires,
+        agreed_to_terms: true,
+        agreed_at: new Date(),
       },
     });
 

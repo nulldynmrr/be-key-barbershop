@@ -12,4 +12,7 @@ exports.userRegisterSchema = z.object({
   password: z
     .string({ required_error: "Password wajib diisi" })
     .min(6, "Password minimal 6 karakter"),
+  agreed: z
+    .boolean({ required_error: "Persetujuan Syarat & Ketentuan wajib" })
+    .refine((val) => val === true, "Anda harus menyetujui Syarat & Ketentuan"),
 });
