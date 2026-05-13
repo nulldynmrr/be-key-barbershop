@@ -1,12 +1,52 @@
 const request = require("supertest");
-const app = require("../app");
 const axios = require("axios");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 jest.mock("axios");
 
+const lcInvoke = { fn: null };
+jest.mock("@langchain/openai", () => ({
+  ChatOpenAI: jest.fn().mockImplementation(() => ({
+    withStructuredOutput: jest.fn().mockReturnValue({
+      invoke: (...args) => {
+        if (!lcInvoke.fn) throw new Error("lcInvoke.fn belum di-set");
+        return lcInvoke.fn(...args);
+      },
+    }),
+  })),
+}));
+
+jest.mock("@langchain/core/messages", () => ({
+  SystemMessage: function SystemMessage(c) {
+    this.content = c;
+  },
+  HumanMessage: function HumanMessage(f) {
+    this.content = f.content;
+  },
+}));
+
+const app = require("../app");
 const prisma = require("../config/prisma");
+const sharp = require("sharp");
+
+let e2eJpegBuffer;
+
+const e2eParsed = () => ({
+  kualitas_foto_ok: true,
+  alasan_kualitas: null,
+  jumlah_wajah: 1,
+  gender: "Pria",
+  status_rambut: "Normal",
+  bentuk_wajah: "Oval",
+  deskripsi_bentuk_wajah: "Oval",
+  jenis_rambut: "Lurus",
+  ketebalan_rambut: "Sedang",
+  ai_confidence: 90,
+  instruksi_barber: "Test",
+  rekomendasi_gaya: [{ nama_gaya: "Crop", alasan: "OK", match_score: 90 }],
+  catatan_stylist: "OK",
+});
 
 describe("E2E Integration: Admin Configuration & User AI Usage", () => {
   let adminToken = "";
@@ -20,16 +60,19 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
     await prisma.systemApiLog.deleteMany();
     await prisma.aIGeneration.deleteMany();
     await prisma.transaction.deleteMany();
-    await prisma.featurePricing.deleteMany();
-    await prisma.aiModel.deleteMany();
-    await prisma.subscriptionPackage.deleteMany();
-    await prisma.creditPackage.deleteMany();
-    await prisma.systemConfig.deleteMany();
+    await prisma.user.updateMany({
+      where: { active_package_id: { not: null } },
+      data: { active_package_id: null },
+    });
     await prisma.user.deleteMany({
       where: { email: { in: ["admin_e2e@test.com", "user_e2e@test.com"] } },
     });
+    await prisma.featurePricing.deleteMany();
+    await prisma.subscriptionPackage.deleteMany();
+    await prisma.aiModel.deleteMany();
+    await prisma.creditPackage.deleteMany();
+    await prisma.systemConfig.deleteMany();
 
-    // Setup System Config
     await prisma.systemConfig.create({
       data: {
         globalMultiplier: 1.35,
@@ -76,18 +119,60 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
 
     const feature = await prisma.featurePricing.create({
       data: {
-        featureCode: "featVirtualTryOn",
-        namaFitur: "Virtual Try On Rambut",
-        koinCost: 10,
+        featureCode: "HAIR_ANALYSIS",
+        namaFitur: "Hair Analysis",
+        koinCost: 5,
         isActive: true,
       },
     });
     featureId = feature.id;
+
+    await prisma.featurePricing.create({
+      data: {
+        featureCode: "STANDARD_SCAN",
+        namaFitur: "Standard Face Scan",
+        koinCost: 0,
+        isActive: true,
+      },
+    });
+
+    e2eJpegBuffer = await sharp({
+      create: { width: 32, height: 32, channels: 3, background: "#ccc" },
+    })
+      .jpeg()
+      .toBuffer();
+
+    axios.post.mockResolvedValue({ data: {} });
+    lcInvoke.fn = async () => ({
+      parsed: e2eParsed(),
+      raw: {
+        usage_metadata: {
+          input_tokens: 500000,
+          output_tokens: 100000,
+          total_tokens: 600000,
+        },
+      },
+    });
   });
 
   afterAll(async () => {
     await prisma.$disconnect();
     jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    axios.post.mockResolvedValue({ data: {} });
+    lcInvoke.fn = async () => ({
+      parsed: e2eParsed(),
+      raw: {
+        usage_metadata: {
+          input_tokens: 500000,
+          output_tokens: 100000,
+          total_tokens: 600000,
+        },
+      },
+    });
   });
 
   describe("Admin Flow: Setup Model, Pricing, & Packages", () => {
@@ -125,9 +210,10 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
       const paketMurah = await prisma.subscriptionPackage.create({
         data: {
           namaPaket: "Starter Pack",
-          jumlahKoin: 100, // 1 Koin = Rp 250 (karena nominal 25000)
+          jumlahKoin: 100,
           deskripsi: "Paket hemat untuk memulai",
           featStandardScan: true,
+          featHairAnalysis: true,
           featVirtualTryOn: false,
           typeValue: "ONTIME",
           hppIdeal: 12400.0,
@@ -169,7 +255,7 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
       await prisma.$transaction(async (tx) => {
         await tx.user.update({
           where: { id: userId },
-          data: { sisa_credit: { increment: paketDibeli.jumlahKoin } },
+          data: { active_package_id: idPaketMurah, sisa_credit: { increment: paketDibeli.jumlahKoin } },
         });
 
         await tx.transaction.create({
@@ -189,50 +275,34 @@ describe("E2E Integration: Admin Configuration & User AI Usage", () => {
     });
 
     it("User berhasil memotong 17 Koin (5 Koin Fitur + 12 Koin Real Token LLM)", async () => {
-      // Simulasi token raksasa (500K Prompt, 100K Output)
-      // Cost: (500k/1M * 0.15) + (100k/1M * 0.60) = 0.075 + 0.060 = $0.135 USD
-      // IDR = $0.135 * 16000 * 1.35 multiplier = Rp 2.916
-      // Koin AI (Harga 1 koin Rp250) = Math.ceil(2916 / 250) = Math.ceil(11.664) = 12 Koin
-      // Total = 5 (Fitur Base) + 12 (AI) = 17 Koin
-      axios.post.mockResolvedValue({
-        data: {
-          choices: [{ message: { content: '{"analisis": "sukses"}' } }],
-          usage: {
-            prompt_tokens: 500000,
-            completion_tokens: 100000,
-            total_tokens: 600000,
-          },
-        },
-      });
-
-      const fakeImageBuffer = Buffer.from("fake-image-base64");
+      const fakeImageBuffer = e2eJpegBuffer;
 
       const res = await request(app)
         .post("/api/v1/ai/analyze-face")
         .set("Authorization", `Bearer ${userToken}`)
-        .field("requestedFeatures", JSON.stringify(["featVirtualTryOn"]))
+        .field("requestedFeatures", JSON.stringify(["HAIR_ANALYSIS"]))
         .attach("foto", fakeImageBuffer, "wajah.jpg");
 
       expect(res.statusCode).toEqual(200);
       expect(res.body.message).toContain("17 koin terpotong");
-      expect(axios.post).toHaveBeenCalledTimes(1);
 
-      // Sisa Koin = 100 - 17 = 83
       const userDb = await prisma.user.findUnique({ where: { id: userId } });
       expect(userDb.sisa_credit).toEqual(83);
     });
 
     it("User ditolak menggunakan AI karena sisa Koin kalah dengan estimasi", async () => {
+      await new Promise((r) => setTimeout(r, 5500));
+
       await prisma.user.update({
         where: { id: userId },
-        data: { sisa_credit: 2 }, // Diset cuma 2 koin (kurang dari base 5 koin)
+        data: { sisa_credit: 2 },
       });
 
-      const fakeImageBuffer = Buffer.from("fake-image");
+      const fakeImageBuffer = e2eJpegBuffer;
       const resNolak = await request(app)
         .post("/api/v1/ai/analyze-face")
         .set("Authorization", `Bearer ${userToken}`)
-        .field("requestedFeatures", JSON.stringify(["featVirtualTryOn"]))
+        .field("requestedFeatures", JSON.stringify(["HAIR_ANALYSIS"]))
         .attach("foto", fakeImageBuffer, "wajah3.jpg");
 
       expect(resNolak.statusCode).toEqual(402);

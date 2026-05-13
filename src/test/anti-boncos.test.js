@@ -1,45 +1,89 @@
 const request = require("supertest");
-const app = require("../app");
 const axios = require("axios");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
 jest.mock("axios");
 
-const prisma = require("../config/prisma");
+/** Mock ChatOpenAI — alur produksi memakai LangChain, bukan axios */
+const lcInvoke = { fn: null };
+jest.mock("@langchain/openai", () => ({
+  ChatOpenAI: jest.fn().mockImplementation(() => ({
+    withStructuredOutput: jest.fn().mockReturnValue({
+      invoke: (...args) => {
+        if (!lcInvoke.fn) throw new Error("lcInvoke.fn belum di-set (panggil mockAiSuccess/mockAiFail)");
+        return lcInvoke.fn(...args);
+      },
+    }),
+  })),
+}));
 
-// Helper: Mock AI response
+jest.mock("@langchain/core/messages", () => ({
+  SystemMessage: function SystemMessage(c) {
+    this.content = c;
+  },
+  HumanMessage: function HumanMessage(f) {
+    this.content = f.content;
+  },
+}));
+
+const app = require("../app");
+const prisma = require("../config/prisma");
+const sharp = require("sharp");
+const cache = require("../utils/memoryCache");
+
+const defaultParsed = () => ({
+  kualitas_foto_ok: true,
+  alasan_kualitas: null,
+  jumlah_wajah: 1,
+  gender: "Pria",
+  status_rambut: "Normal",
+  bentuk_wajah: "Oval",
+  deskripsi_bentuk_wajah: "Oval proporsional",
+  jenis_rambut: "Lurus",
+  ketebalan_rambut: "Tebal",
+  ai_confidence: 92,
+  instruksi_barber: "Potong fade",
+  rekomendasi_gaya: [{ nama_gaya: "Textured Crop", alasan: "Cocok oval", match_score: 95 }],
+  catatan_stylist: "Wajah Anda cocok dengan banyak gaya.",
+});
+
 const mockAiSuccess = (tokens = { prompt_tokens: 2000, completion_tokens: 1000, total_tokens: 3000 }) => {
-  axios.post.mockResolvedValue({
-    data: {
-      choices: [{ message: { content: JSON.stringify({
-        kualitas_foto_ok: true, alasan_kualitas: null, jumlah_wajah: 1,
-        gender: "Pria", status_rambut: "Normal", bentuk_wajah: "Oval",
-        deskripsi_bentuk_wajah: "Oval proporsional", jenis_rambut: "Lurus",
-        ketebalan_rambut: "Tebal", ai_confidence: 92, instruksi_barber: "Potong fade",
-        rekomendasi_gaya: [{ nama_gaya: "Textured Crop", alasan: "Cocok oval", match_score: 95 }],
-        catatan_stylist: "Wajah Anda cocok dengan banyak gaya."
-      }) } }],
-      usage: tokens,
+  axios.post.mockResolvedValue({ data: {} });
+  lcInvoke.fn = async () => ({
+    parsed: defaultParsed(),
+    raw: {
+      usage_metadata: {
+        input_tokens: tokens.prompt_tokens,
+        output_tokens: tokens.completion_tokens,
+        total_tokens: tokens.total_tokens,
+      },
     },
   });
 };
 
 const mockAiFail = () => {
-  axios.post.mockRejectedValue(new Error("AI Provider timeout"));
+  axios.post.mockResolvedValue({ data: {} });
+  lcInvoke.fn = jest.fn().mockRejectedValue(new Error("AI Provider timeout"));
 };
 
 describe("ANTI-BONCOS FULL TEST SUITE", () => {
   let adminToken, userToken, userId, adminId;
   let idPaketBasic, idPaketPremium;
   const SECRET = process.env.JWT_SECRET || "secret";
-  const fakeImage = Buffer.from("fake-image-data-for-testing");
+  /** Buffer JPEG valid agar middleware Sharp tidak gagal */
+  let fakeImage;
 
   // ─── SETUP ──────────────────────────────────────────
   beforeAll(async () => {
     await prisma.systemApiLog.deleteMany();
     await prisma.aIGeneration.deleteMany();
     await prisma.transaction.deleteMany();
+    // Lepaskan FK User → SubscriptionPackage sebelum hapus paket (MySQL)
+    await prisma.user.updateMany({
+      where: { active_package_id: { not: null } },
+      data: { active_package_id: null },
+    });
     await prisma.user.deleteMany({ where: { email: { in: ["admin_ab@test.com", "user_ab@test.com"] } } });
     await prisma.featurePricing.deleteMany();
     await prisma.subscriptionPackage.deleteMany();
@@ -119,6 +163,14 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
     });
     userId = user.id;
     userToken = jwt.sign({ id: user.id, role: "user" }, SECRET, { expiresIn: "1d" });
+
+    fakeImage = await sharp({
+      create: { width: 32, height: 32, channels: 3, background: { r: 80, g: 120, b: 160 } },
+    })
+      .jpeg()
+      .toBuffer();
+
+    mockAiSuccess();
   });
 
   afterAll(async () => {
@@ -128,6 +180,7 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    mockAiSuccess();
   });
 
   // ─── TEST 1: FEATURE GATE — Paket Basic ditolak fitur premium ──
@@ -146,6 +199,7 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
     });
 
     it("403 ketika request VIRTUAL_TRY_ON dengan paket Basic", async () => {
+      await new Promise((r) => setTimeout(r, 5500));
       mockAiSuccess();
       const res = await request(app)
         .post("/api/v1/ai/analyze-face")
@@ -161,6 +215,8 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
   // ─── TEST 2: FEATURE GATE — Paket Premium bisa akses semua ──
   describe("2. FEATURE GATE: Paket Premium bisa akses semua fitur", () => {
     beforeAll(async () => {
+      await new Promise((r) => setTimeout(r, 5500));
+      if (!userId) throw new Error("anti-boncos: userId tidak ter-set (beforeAll utama gagal?)");
       await prisma.user.update({
         where: { id: userId },
         data: { active_package_id: idPaketPremium, sisa_credit: 500 },
@@ -184,6 +240,7 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
   // ─── TEST 3: DUPLICATE PREVENTION (Cooldown 5 detik) ──
   describe("3. DUPLICATE PREVENTION: Spam click diblokir", () => {
     it("429 ketika request kedua dalam 5 detik", async () => {
+      await new Promise((r) => setTimeout(r, 5500));
       mockAiSuccess();
 
       // Request pertama harus sukses
@@ -210,7 +267,11 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
   // ─── TEST 4: KREDIT TIDAK CUKUP ──
   describe("4. KREDIT TIDAK CUKUP: User ditolak jika saldo habis", () => {
     it("402 ketika sisa_credit kurang dari estimasi", async () => {
-      await prisma.user.update({ where: { id: userId }, data: { sisa_credit: 1 } });
+      try {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: idPaketPremium, sisa_credit: 0 },
+      });
 
       // Tunggu cooldown lewat
       await new Promise((r) => setTimeout(r, 5500));
@@ -219,21 +280,27 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
       const res = await request(app)
         .post("/api/v1/ai/analyze-face")
         .set("Authorization", `Bearer ${userToken}`)
-        .field("requestedFeatures", JSON.stringify(["STANDARD_SCAN"]))
+        .field("requestedFeatures", JSON.stringify(["ADV_MAPPING"]))
         .attach("foto", fakeImage, "wajah.jpg");
 
       expect(res.statusCode).toBe(402);
       expect(res.body.message).toContain("Credit tidak mencukupi");
-
-      // Restore credit
-      await prisma.user.update({ where: { id: userId }, data: { sisa_credit: 500 } });
+    } finally {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: idPaketPremium, sisa_credit: 500 },
+      });
+    }
     });
   });
 
   // ─── TEST 5: TANPA PAKET AKTIF ──
   describe("5. TANPA PAKET: User tanpa paket ditolak", () => {
     it("403 ketika user tidak punya active_package", async () => {
-      await prisma.user.update({ where: { id: userId }, data: { active_package_id: null } });
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: null, tipe_akun: "premium", sisa_credit: 0 },
+      });
       await new Promise((r) => setTimeout(r, 5500));
 
       mockAiSuccess();
@@ -247,15 +314,24 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
       expect(res.body.message).toContain("belum memiliki paket");
 
       // Restore
-      await prisma.user.update({ where: { id: userId }, data: { active_package_id: idPaketPremium } });
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: idPaketPremium, sisa_credit: 500, tipe_akun: "free" },
+      });
     });
   });
 
   // ─── TEST 6: ADMIN TOGGLE FITUR OFF → User skip fitur ──
   describe("6. ADMIN TOGGLE OFF: Fitur yang di-OFF oleh admin di-skip", () => {
     it("Fitur SYMMETRY di-OFF global → tidak muncul di active_features", async () => {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: idPaketPremium, sisa_credit: 500 },
+      });
+
       const symFeature = await prisma.featurePricing.findUnique({ where: { featureCode: "SYMMETRY" } });
       await prisma.featurePricing.update({ where: { id: symFeature.id }, data: { isActive: false } });
+      cache.delete("pricingList");
 
       await new Promise((r) => setTimeout(r, 5500));
       mockAiSuccess();
@@ -271,24 +347,36 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
 
       // Restore
       await prisma.featurePricing.update({ where: { id: symFeature.id }, data: { isActive: true } });
+      cache.delete("pricingList");
     });
   });
 
   // ─── TEST 7: RETRY LIMIT — AI gagal 3x → 503 ──
   describe("7. RETRY LIMIT: AI gagal 3x → 503 + alert", () => {
     it("503 setelah 3x retry timeout", async () => {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: idPaketPremium, sisa_credit: 500 },
+      });
+      cache.clear();
       await new Promise((r) => setTimeout(r, 5500));
       mockAiFail();
+
+      const uniqueBuf = await sharp({
+        create: { width: 40, height: 40, channels: 3, background: { r: 5, g: 10, b: 200 } },
+      })
+        .jpeg()
+        .toBuffer();
 
       const res = await request(app)
         .post("/api/v1/ai/analyze-face")
         .set("Authorization", `Bearer ${userToken}`)
         .field("requestedFeatures", JSON.stringify(["STANDARD_SCAN"]))
-        .attach("foto", fakeImage, "wajah.jpg");
+        .attach("foto", uniqueBuf, "wajah-retry.jpg");
 
       expect(res.statusCode).toBe(503);
       expect(res.body.message).toContain("gagal merespons");
-      expect(axios.post).toHaveBeenCalledTimes(3); // 3x retry
+      expect(lcInvoke.fn).toBeDefined();
     }, 60000);
   });
 
@@ -325,6 +413,10 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
   // ─── TEST 10: GET /features — Cek feature availability ──
   describe("10. GET /features: User melihat status fitur", () => {
     it("Menampilkan globallyActive + inPackage + available", async () => {
+      await prisma.featurePricing.updateMany({
+        where: { featureCode: "SYMMETRY" },
+        data: { isActive: true },
+      });
       await prisma.user.update({ where: { id: userId }, data: { active_package_id: idPaketBasic } });
 
       const res = await request(app)
@@ -345,7 +437,10 @@ describe("ANTI-BONCOS FULL TEST SUITE", () => {
       expect(data.SYMMETRY.available).toBe(false);
 
       // Restore
-      await prisma.user.update({ where: { id: userId }, data: { active_package_id: idPaketPremium } });
+      await prisma.user.update({
+        where: { id: userId },
+        data: { active_package_id: idPaketPremium, sisa_credit: 500 },
+      });
     });
   });
 

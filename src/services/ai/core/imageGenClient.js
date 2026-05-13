@@ -5,13 +5,26 @@ const path = require("path");
 const { decrypt } = require("../../../utils/encryption");
 const { reportSystemError } = require("../../alert.service");
 const prisma = require("../../../config/prisma");
+const { resolveChatCompletionsPostUrl } = require("./openAiUrl");
+const { normalizeOpenAiCompatibleUsage } = require("../billing");
+
+/** Ambil blok usage dari respons chat completions (OpenAI / MAIA). */
+function extractUsageFromChatCompletionResponse(data) {
+  const top = data?.usage;
+  const fromChoice = data?.choices?.[0]?.usage;
+  if (top && typeof top === "object" && Object.keys(top).length > 0) return top;
+  if (fromChoice && typeof fromChoice === "object" && Object.keys(fromChoice).length > 0) return fromChoice;
+  return top || fromChoice || {};
+}
 
 /**
- * Eksekusi Virtual Try-On Image Generation.
+ * Virtual Try-On lewat MAIA / OpenAI-compatible **chat completions**
+ * (sama pola dengan curl `POST .../v1/chat/completions` + responseModalities TEXT+IMAGE).
+ * Endpoint `POST .../v1/images/edits` (multipart) belum dipakai di sini.
  */
 const generateVirtualTryOn = async (configImageGen, file, hasilAnalisis, userPackage, isFreeTrial, cleanName, urlFotoUpload) => {
   let generatedImageUrls = [];
-  let imageGenCostUsd = 0;
+  /** Agregat usage nyata dari respons router (per panggilan dijumlahkan). */
   let imageGenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
   try {
@@ -25,6 +38,11 @@ const generateVirtualTryOn = async (configImageGen, file, hasilAnalisis, userPac
     }
 
     const imageBase64 = file.buffer.toString("base64");
+    const mimeForDataUrl =
+      file.mimetype && /^image\/(jpeg|png|webp|gif)$/i.test(file.mimetype)
+        ? file.mimetype
+        : "image/jpeg";
+    const chatCompletionsUrl = resolveChatCompletionsPostUrl(configImageGen.baseUrl);
 
     const generateSingleImage = async (targetStyle, index) => {
       // Ambil data try_on_config dari LLM jika tersedia
@@ -60,7 +78,7 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
 
       try {
         const response = await axios.post(
-          `${configImageGen.baseUrl}`,
+          chatCompletionsUrl,
           {
             model: configImageGen.modelName,
             messages: [
@@ -68,36 +86,46 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
                 role: "user",
                 content: [
                   { type: "text", text: editPrompt },
-                  { type: "image_url", image_url: { url: `data:${file.mimetype};base64,${imageBase64}` } },
+                  { type: "image_url", image_url: { url: `data:${mimeForDataUrl};base64,${imageBase64}` } },
                 ],
               },
             ],
             candidateCount: 1,
             responseModalities: ["TEXT", "IMAGE"],
-            imageConfig: { aspectRatio: "1:1", imageSize: "1K" }
+            imageConfig: { aspectRatio: "1:1", imageSize: "1K" },
           },
           {
-            headers: { Authorization: `Bearer ${decrypt(configImageGen.apiKey)}` },
+            headers: {
+              Authorization: `Bearer ${decrypt(configImageGen.apiKey)}`,
+              "Content-Type": "application/json",
+            },
             timeout: 180000,
-          }
+          },
         );
 
         let extractedUrl = null;
-        let extractedCostUsd = 0;
         const msg = response.data?.choices?.[0]?.message;
 
-        // DEBUG: Log struktur response dari AI Image Gen
-        console.log(`[Image Gen Debug] Response keys:`, Object.keys(response.data || {}));
-        console.log(`[Image Gen Debug] choices length:`, response.data?.choices?.length);
-        if (msg) {
-          console.log(`[Image Gen Debug] msg keys:`, Object.keys(msg));
-          console.log(`[Image Gen Debug] msg.content type:`, typeof msg.content, Array.isArray(msg.content) ? `(array, length: ${msg.content.length})` : '');
-          if (Array.isArray(msg.content)) {
-            msg.content.forEach((part, i) => console.log(`[Image Gen Debug] content[${i}].type:`, part.type));
+        if (process.env.DEBUG_AI_GRAPH === "1") {
+          console.log(`[Image Gen Debug] Response keys:`, Object.keys(response.data || {}));
+          console.log(`[Image Gen Debug] choices length:`, response.data?.choices?.length);
+          if (msg) {
+            console.log(`[Image Gen Debug] msg keys:`, Object.keys(msg));
+            console.log(
+              `[Image Gen Debug] msg.content type:`,
+              typeof msg.content,
+              Array.isArray(msg.content) ? `(array, length: ${msg.content.length})` : "",
+            );
+            if (Array.isArray(msg.content)) {
+              msg.content.forEach((part, i) => console.log(`[Image Gen Debug] content[${i}].type:`, part.type));
+            }
+            if (msg.images) console.log(`[Image Gen Debug] msg.images length:`, msg.images.length);
+          } else {
+            console.warn(
+              `[Image Gen Debug] msg is undefined/null! Full response.data:`,
+              JSON.stringify(response.data).substring(0, 500),
+            );
           }
-          if (msg.images) console.log(`[Image Gen Debug] msg.images length:`, msg.images.length);
-        } else {
-          console.warn(`[Image Gen Debug] msg is undefined/null! Full response.data:`, JSON.stringify(response.data).substring(0, 500));
         }
 
         if (msg) {
@@ -115,7 +143,6 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
                 if (dataMatch) { extractedBase64 = dataMatch[1]; break; }
                 else if (img.image_url.url.startsWith("http")) {
                   extractedUrl = img.image_url.url;
-                  extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
                   break;
                 }
               }
@@ -128,7 +155,6 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
                 if (dataMatch) { extractedBase64 = dataMatch[1]; break; }
                 else if (part.image_url.url.startsWith("http")) {
                   extractedUrl = part.image_url.url;
-                  extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
                   break;
                 }
               }
@@ -144,12 +170,10 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
             const mdImgMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
             if (mdImgMatch && mdImgMatch[1]) {
               extractedUrl = mdImgMatch[1];
-              extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
             } else {
               const urlMatch = msg.content.match(/(https?:\/\/[^\s]+(?:png|jpe?g|webp|gif|avif)[^\s]*)/i);
               if (urlMatch && urlMatch[1]) {
                 extractedUrl = urlMatch[1];
-                extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
               }
             }
           }
@@ -161,17 +185,18 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
             const webpBuffer = await sharp(imgBuffer).webp({ quality: 90 }).toBuffer();
             fs.writeFileSync(genFilePath, webpBuffer);
             extractedUrl = `/uploads/ai_results/${genFileName}`;
-            extractedCostUsd = Number(configImageGen.hargaPerImage) || 0;
-            console.log(`[Image Gen] Gambar berhasil disimpan: ${extractedUrl}`);
+            if (process.env.DEBUG_AI_GRAPH === "1") {
+              console.log(`[Image Gen] Gambar berhasil disimpan: ${extractedUrl}`);
+            }
           } else {
             console.warn(`[Image Gen] GAGAL extract gambar untuk gaya '${targetStyle}'. Tidak ada base64/URL yang ditemukan dari response.`);
           }
         }
 
+        const usage = normalizeOpenAiCompatibleUsage(extractUsageFromChatCompletionResponse(response.data));
         return {
           url: extractedUrl || null,
-          cost: extractedCostUsd,
-          usage: response.data?.usage || {}
+          usage,
         };
       } catch (e) {
         const errorBody = e.response?.data?.error || {};
@@ -207,20 +232,24 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
           throw err;
         }
 
-        return { url: null, cost: 0, usage: {} };
+        return { url: null, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
       }
     };
 
     const results = await Promise.all(targets.map((target, idx) => generateSingleImage(target, idx)));
 
-    generatedImageUrls = results.map(r => r.url).filter(Boolean);
-    imageGenCostUsd = results.reduce((sum, r) => sum + r.cost, 0);
-    // Aggregate usage
-    results.forEach(r => {
-      imageGenUsage.prompt_tokens += (r.usage?.prompt_tokens || 0);
-      imageGenUsage.completion_tokens += (r.usage?.completion_tokens || 0);
-      imageGenUsage.total_tokens += (r.usage?.total_tokens || 0);
+    generatedImageUrls = results.map((r) => r.url).filter(Boolean);
+    results.forEach((r) => {
+      imageGenUsage.prompt_tokens += r.usage?.prompt_tokens || 0;
+      imageGenUsage.completion_tokens += r.usage?.completion_tokens || 0;
+      imageGenUsage.total_tokens += r.usage?.total_tokens || 0;
     });
+    if (
+      !imageGenUsage.total_tokens &&
+      (imageGenUsage.prompt_tokens || imageGenUsage.completion_tokens)
+    ) {
+      imageGenUsage.total_tokens = imageGenUsage.prompt_tokens + imageGenUsage.completion_tokens;
+    }
 
   } catch (e) {
     console.error("Image Gen Overall Error:", e.message);
@@ -229,7 +258,7 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
     }
   }
 
-  return { generatedImageUrls, imageGenCostUsd, imageGenUsage };
+  return { generatedImageUrls, imageGenUsage };
 };
 
 module.exports = { generateVirtualTryOn };

@@ -4,18 +4,7 @@ const cache = require("../utils/memoryCache");
 
 const prisma = require("../config/prisma");
 
-const FEATURE_GATE_MAP = {
-  STANDARD_SCAN:        "featStandardScan",
-  FACE_HEATMAP:         "featFaceHeatmap",
-  SYMMETRY:             "featSymmetry",
-  ADV_MAPPING:          "featAdvMapping",
-  HAIR_ANALYSIS:        "featHairAnalysis",
-  RISK_ANALYSIS:        "featRiskAnalysis",
-  BARBER_INSTRUCTIONS:  "featBarberInstructions",
-  VIRTUAL_TRY_ON:       "featVirtualTryOn",
-  HISTORY:              "featHistory",
-  TREND_ANALYSIS:       "featTrendAnalysis",
-};
+const { FEATURE_GATE_MAP } = require("../services/ai/featureGateMap");
 
 exports.analyzeFace = async (req, res) => {
   try {
@@ -65,6 +54,8 @@ exports.analyzeFace = async (req, res) => {
         service_fee: result.totalKoinFitur,
         token_fee: result.realKoinAi,
         image_gen_fee: result.imageGenKoin || 0,
+        credit_before: result.sisa_credit_before,
+        credit_after: result.sisa_credit_after,
       },
     });
   } catch (error) {

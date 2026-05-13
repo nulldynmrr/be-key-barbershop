@@ -1,0 +1,108 @@
+const prisma = require("../../../../config/prisma");
+const { normalizeOpenAiCompatibleUsage } = require("../../billing");
+
+const dbTransactionNode = async (state) => {
+  const {
+    userId,
+    activeFeatures,
+    hasil_analisis,
+    generatedImageUrls,
+    url_foto_upload,
+    configAi,
+    configImageGen,
+    llmUsage,
+    realBilling,
+    billingBase,
+    imageGenCostUsd,
+    imageGenKoin,
+    imageGenUsage,
+    user,
+    isFreeTrial,
+    totalDipotong,
+  } = state;
+
+  const urls = generatedImageUrls ?? [];
+  const saveToHistory = activeFeatures.includes("HISTORY");
+  const mockTryOnImage = activeFeatures.includes("VIRTUAL_TRY_ON") ? urls : null;
+  const finalTotalDipotong = totalDipotong;
+  const igCost = imageGenCostUsd ?? 0;
+  const igKoin = imageGenKoin ?? 0;
+  const igUsage = normalizeOpenAiCompatibleUsage(imageGenUsage);
+  const usage = normalizeOpenAiCompatibleUsage(llmUsage);
+
+  const resultTx = await prisma.$transaction(async (tx) => {
+    let aiRecord = null;
+
+    if (saveToHistory) {
+      aiRecord = await tx.aIGeneration.create({
+        data: {
+          user_id: userId,
+          url_foto_upload,
+          url_hasil_img: mockTryOnImage,
+          hasil_analisis,
+          harga_credit_terpakai: finalTotalDipotong,
+        },
+      });
+    }
+
+    await tx.systemApiLog.create({
+      data: {
+        model_name: configAi.modelName,
+        input_tokens: usage.prompt_tokens || 0,
+        output_tokens: usage.completion_tokens || 0,
+        total_tokens: usage.total_tokens || 0,
+        cost_usd: realBilling.realCostUsd,
+        koin_charged: billingBase.totalKoinFitur + realBilling.realKoinAi,
+        service_fee_koin: billingBase.totalKoinFitur,
+        token_fee_koin: realBilling.realKoinAi,
+        features_used: JSON.stringify(activeFeatures),
+        user_id: userId,
+        ai_generation_id: aiRecord?.id || null,
+      },
+    });
+
+    const logImageGen =
+      configImageGen &&
+      (igCost > 0 ||
+        igKoin > 0 ||
+        igUsage.prompt_tokens > 0 ||
+        igUsage.completion_tokens > 0 ||
+        igUsage.total_tokens > 0 ||
+        urls.length > 0);
+
+    if (logImageGen) {
+      await tx.systemApiLog.create({
+        data: {
+          model_name: configImageGen.modelName,
+          input_tokens: igUsage.prompt_tokens,
+          output_tokens: igUsage.completion_tokens,
+          total_tokens: igUsage.total_tokens,
+          cost_usd: igCost,
+          koin_charged: igKoin,
+          service_fee_koin: 0,
+          token_fee_koin: igKoin,
+          features_used: JSON.stringify(["VIRTUAL_TRY_ON"]),
+          user_id: userId,
+          ai_generation_id: aiRecord?.id || null,
+        },
+      });
+    }
+
+    const amountToDeduct = isFreeTrial ? user.sisa_credit : finalTotalDipotong;
+    const sisa_credit_after = Math.max(0, (state.sisa_credit_before || user.sisa_credit) - amountToDeduct);
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { sisa_credit: { decrement: amountToDeduct } },
+    });
+
+    return { aiRecord, sisa_credit_after };
+  });
+
+  return {
+    resultTx: resultTx.aiRecord,
+    sisa_credit_after: resultTx.sisa_credit_after
+  };
+};
+
+module.exports = { dbTransactionNode };
