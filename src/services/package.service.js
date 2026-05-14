@@ -95,11 +95,20 @@ const calculateLiveHPP = async (payload) => {
   // === 2. HITUNG COST IMAGE GEN (Jika Aktif) ===
   if (featVirtualTryOn && selectedImage) {
     const limit = virtualTryOnLimit > 0 ? virtualTryOnLimit : 1;
-    costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0) * limit;
-    
-    let imageTokenCost = (Number(selectedImage.hargaInput1M) || 0) / 1_000_000;
-    let imageTokens = selectedImage.avgTokensPerUse || 0;
-    costPerActionUsd += (imageTokens * imageTokenCost) * limit;
+    const unit = String(selectedImage.pricingUnit || "TOKEN").toUpperCase();
+
+    if (unit === "IMAGE") {
+      costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0) * limit;
+      const imgTok = Number(selectedImage.avgTokensPerUse) || 0;
+      const in1m = Number(selectedImage.hargaInput1M) || 0;
+      if (imgTok > 0 && in1m > 0) {
+        costPerActionUsd += (imgTok / 1_000_000) * in1m * limit;
+      }
+    } else {
+      const imgCostPerToken =
+        ((Number(selectedImage.hargaInput1M) || 0) + (Number(selectedImage.hargaOutput1M) || 0)) / 2 / 1_000_000;
+      costPerActionUsd += (Number(selectedImage.avgTokensPerUse) || 2000) * imgCostPerToken * limit;
+    }
   }
 
   let costPerActionIdr = costPerActionUsd * effectiveRate;

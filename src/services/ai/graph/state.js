@@ -70,6 +70,17 @@ const FaceAnalysisStateAnnotation = Annotation.Root({
     default: () => null,
   }),
 
+  /** SHA-256 hex buffer foto (pasca-kompresi), untuk dedupe DB + RAM */
+  imageFingerprint: Annotation({
+    value: (_, newVal) => newVal,
+    default: () => null,
+  }),
+  /** SHA-256 hex daftar fitur aktif (sorted), supaya cache tidak tertukar antar paket fitur */
+  featureFingerprint: Annotation({
+    value: (_, newVal) => newVal,
+    default: () => null,
+  }),
+
   // diisi oleh llmNode 
   hasil_analisis: Annotation({
     value: (_, newVal) => newVal,

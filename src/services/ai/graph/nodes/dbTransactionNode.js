@@ -19,6 +19,8 @@ const dbTransactionNode = async (state) => {
     user,
     isFreeTrial,
     totalDipotong,
+    imageFingerprint,
+    featureFingerprint,
   } = state;
 
   const urls = generatedImageUrls ?? [];
@@ -33,10 +35,13 @@ const dbTransactionNode = async (state) => {
   const resultTx = await prisma.$transaction(async (tx) => {
     let aiRecord = null;
 
+    // Hanya CREATE — tidak menghapus/update history lama; daftar history user menumpuk selamanya.
     if (saveToHistory) {
       aiRecord = await tx.aIGeneration.create({
         data: {
           user_id: userId,
+          image_hash: imageFingerprint || null,
+          feature_fingerprint: featureFingerprint || null,
           url_foto_upload,
           url_hasil_img: mockTryOnImage,
           hasil_analisis,
@@ -88,8 +93,21 @@ const dbTransactionNode = async (state) => {
       });
     }
 
-    const amountToDeduct = isFreeTrial ? user.sisa_credit : finalTotalDipotong;
-    const sisa_credit_after = Math.max(0, (state.sisa_credit_before || user.sisa_credit) - amountToDeduct);
+    // 1. Re-verify credit balance inside the transaction to prevent race conditions
+    const currentUser = await tx.user.findUnique({
+      where: { id: userId },
+      select: { sisa_credit: true }
+    });
+
+    if (!isFreeTrial && currentUser.sisa_credit < finalTotalDipotong) {
+      const err = new Error("Credit tidak mencukupi (terdeteksi perubahan saldo bersamaan).");
+      err.statusCode = 402;
+      err.errorCode = "INSUFFICIENT_CREDITS";
+      throw err;
+    }
+
+    const amountToDeduct = isFreeTrial ? currentUser.sisa_credit : finalTotalDipotong;
+    const sisa_credit_after = Math.max(0, currentUser.sisa_credit - amountToDeduct);
 
     await tx.user.update({
       where: { id: userId },

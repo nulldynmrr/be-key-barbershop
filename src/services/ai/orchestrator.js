@@ -35,7 +35,26 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
     requestedFeatures,
   };
 
-  const finalState = await compiledGraph.invoke(initialState);
+  let finalState;
+  try {
+    finalState = await compiledGraph.invoke(initialState);
+  } catch (err) {
+    // If the graph fails, we don't have finalState yet. 
+    // Any cleanup would need to happen inside nodes or we'd need to catch the url elsewhere.
+    // For now, let's ensure the most critical part (orphaned files) is handled.
+    throw err;
+  } finally {
+    // Cleanup orphaned file if DB transaction failed
+    if (finalState && !finalState.resultTx && finalState.url_foto_upload) {
+      const fs = require("fs");
+      const path = require("path");
+      const filePath = path.join(process.cwd(), finalState.url_foto_upload);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`[Orchestrator] Cleaned up orphaned file: ${finalState.url_foto_upload}`);
+      }
+    }
+  }
 
   return {
     kualitas_ok: finalState.hasil_analisis?.kualitas_foto_ok,

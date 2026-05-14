@@ -10,6 +10,7 @@ const {
   getAuditLogs,
   requestAdminOTP,
 } = require("../controllers/admin.controller");
+const { resolveUserEmail } = require("../controllers/user.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
 const router = Router();
@@ -79,6 +80,7 @@ router.get("/users", getUsers);
  *         description: User berhasil dihapus
  */
 router.get("/users/:id", getUserDetail);
+router.get("/users/:id/resolve-email", resolveUserEmail);
 router.delete("/users/:id", deleteUser);
 
 /**

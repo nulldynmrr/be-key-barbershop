@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/auth.controller");
-const { verifyToken } = require("../middleware/auth.middleware");
+const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
+const { aiLimiter } = require("../middleware/security.middleware");
 
 /**
  * @swagger
@@ -103,7 +104,13 @@ router.post("/admin/login", authController.adminLogin);
  *       201:
  *         description: Registrasi berhasil
  */
-router.post("/register", authController.register);
+router.post("/register", (req, res, next) => {
+  const secret = req.headers["x-setup-secret"];
+  if (process.env.NODE_ENV === "production" && secret !== process.env.REGISTER_SECRET) {
+    return res.status(403).json({ success: false, message: "Akses ditolak." });
+  }
+  next();
+}, authController.register);
 
 /**
  * @swagger
@@ -167,7 +174,7 @@ router.post("/user/register", authController.userRegister);
  *       403:
  *         description: Bukan user
  */
-router.post("/user/login", authController.userLogin);
+router.post("/user/login", aiLimiter, authController.userLogin);
 
 /**
  * @swagger
@@ -208,7 +215,7 @@ router.post("/user/login", authController.userLogin);
  *       500:
  *         description: Kesalahan server internal
  */
-router.post("/forgot-password", authController.forgotPassword);
+router.post("/forgot-password", aiLimiter, authController.forgotPassword);
 
 /**
  * @swagger
@@ -236,7 +243,7 @@ router.post("/forgot-password", authController.forgotPassword);
  *       500:
  *         description: Gagal mengirim email
  */
-router.post("/request-otp", authController.requestOTP);
+router.post("/request-otp", aiLimiter, authController.requestOTP);
 
 /**
  * @swagger

@@ -1,34 +1,17 @@
-const crypto = require("crypto");
-const { ChatOpenAI } = require("@langchain/openai");
-const { HumanMessage, SystemMessage } = require("@langchain/core/messages");
-
-const cache = require("../../../../utils/memoryCache");
-const { decrypt } = require("../../../../utils/encryption");
-const { reportSystemError } = require("../../../alert.service");
-const { buildDynamicPrompt } = require("../../core/promptBuilder");
-const { normalizeOpenAiBaseUrl } = require("../../core/openAiUrl");
-const { FaceAnalysisOutputSchema } = require("../../schemas/analysisOutput.schema");
+const { getAnalysisRefreshWindowDays } = require("../../analysisRefreshWindow");
 const { calculateRealBilling } = require("../../billing");
+const { getCache, setCache } = require("./llm/cacheManager");
+const { getFingerprints, preparePrompts } = require("./llm/promptManager");
+const { invokeLLM } = require("./llm/llmInvoker");
 
-const prisma = require("../../../../config/prisma");
-
-const MAX_RETRIES = 3;
-
-const DATA_URL_MIME_FALLBACK = "image/jpeg";
-
-function extractBudgetAndMessage(aiError) {
-  const msg = aiError?.message || "";
-  const lc = aiError?.lc_kwargs || {};
-  const response = aiError?.response || lc?.response;
-  const data = response?.data || aiError?.response?.data;
-  const errorBody = data?.error || {};
-  const errorMsg = errorBody.message || msg;
-  return { errorBody, errorMsg: String(errorMsg) };
-}
-
+/**
+ * Optimized LLM Node for LangGraph
+ * Orchestrates Cache, Prompting, and LLM Invocation
+ */
 const llmNode = async (state) => {
-  const { userId, file, activeFeatures, configAi, billingBase, imageBase64 } = state;
+  const { userId, file, activeFeatures, configAi, billingBase, imageBase64, userPackage, isFreeTrial } = state;
 
+  // 1. Validation
   if (!file?.buffer || !Buffer.isBuffer(file.buffer)) {
     const err = new Error("State graph tidak valid: buffer gambar hilang.");
     err.statusCode = 500;
@@ -40,125 +23,53 @@ const llmNode = async (state) => {
     throw err;
   }
 
-  const imageFingerprint = crypto.createHash("sha256").update(file.buffer).digest("hex");
-  const cacheKey = `ai_result:${imageFingerprint}`;
-  const cachedResult = cache.get(cacheKey);
+  // 2. Fingerprinting & Refresh Window
+  const { imageFingerprint, featureFingerprint } = getFingerprints(file.buffer, activeFeatures);
+  const refreshWindowDays = getAnalysisRefreshWindowDays(userPackage, !!isFreeTrial);
 
-  if (cachedResult) {
+  // 3. Cache Check (RAM + DB)
+  const cacheResult = await getCache({
+    imageFingerprint,
+    featureFingerprint,
+    refreshWindowDays,
+    configAi,
+    billingBase,
+    userId
+  });
+
+  if (cacheResult?.hasil_analisis) {
     if (process.env.DEBUG_AI_GRAPH === "1") {
-      console.log(`[LangGraph llmNode] Cache HIT. Bypass LLM. Hash: ${imageFingerprint}`);
+      console.log(`[LLM Node] Cache HIT (${cacheResult.hit}). Hash: ${imageFingerprint.slice(0, 8)}`);
     }
-    const realBilling = calculateRealBilling(
-      { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-      configAi,
-      billingBase,
-      billingBase.totalKoinFitur,
-    );
     return {
-      hasil_analisis: cachedResult,
+      hasil_analisis: cacheResult.hasil_analisis,
       llmUsage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-      realBilling,
-      totalDipotong: realBilling.totalDipotong,
+      realBilling: cacheResult.realBilling,
+      totalDipotong: cacheResult.realBilling.totalDipotong,
+      imageFingerprint,
+      featureFingerprint,
     };
   }
 
-  const { systemInstruction, promptText } = buildDynamicPrompt(activeFeatures);
-  const decryptedApiKey = decrypt(configAi.apiKey);
-  const baseURL = normalizeOpenAiBaseUrl(configAi.baseUrl);
+  // 4. LLM Invocation
+  const { systemInstruction, promptText } = preparePrompts(
+    activeFeatures, 
+    cacheResult?.staleAnalysis, 
+    refreshWindowDays
+  );
 
-  const llm = new ChatOpenAI({
-    apiKey: decryptedApiKey,
-    model: configAi.modelName,
-    temperature: 0,
-    timeout: 120000,
-    maxRetries: MAX_RETRIES,
-    configuration: { baseURL },
+  const { hasil_analisis, llmUsage } = await invokeLLM({
+    configAi,
+    systemInstruction,
+    promptText,
+    imageBase64,
+    file,
+    userId
   });
 
-  const structuredLlm = llm.withStructuredOutput(FaceAnalysisOutputSchema, {
-    name: "face_analysis_output",
-    method: "jsonMode",
-    includeRaw: true,
-  });
-
-  const b64 = imageBase64 ?? file.buffer.toString("base64");
-  const mimeForDataUrl =
-    file.mimetype && /^image\/(jpeg|png|webp|gif)$/i.test(file.mimetype)
-      ? file.mimetype
-      : DATA_URL_MIME_FALLBACK;
-  const imageDataUrl = `data:${mimeForDataUrl};base64,${b64}`;
-
-  const messages = [
-    new SystemMessage(systemInstruction),
-    new HumanMessage({
-      content: [
-        { type: "text", text: promptText },
-        { type: "image_url", image_url: { url: imageDataUrl } },
-      ],
-    }),
-  ];
-
-  let hasil_analisis;
-  let llmUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-
-  try {
-    const rawResult = await structuredLlm.invoke(messages);
-    hasil_analisis = rawResult.parsed;
-    const rawMsg = rawResult.raw;
-    if (rawMsg?.usage_metadata) {
-      llmUsage = {
-        prompt_tokens: rawMsg.usage_metadata.input_tokens ?? rawMsg.usage_metadata.prompt_tokens ?? 0,
-        completion_tokens: rawMsg.usage_metadata.output_tokens ?? rawMsg.usage_metadata.completion_tokens ?? 0,
-        total_tokens: rawMsg.usage_metadata.total_tokens ?? 0,
-      };
-    }
-  } catch (aiError) {
-    const { errorBody, errorMsg } = extractBudgetAndMessage(aiError);
-
-    if (errorBody.type === "budget_exceeded" || errorMsg.includes("Budget has been exceeded")) {
-      const budgetMatch = errorMsg.match(/Max budget:\s*([\d.]+)/i);
-      const realMaxBudget = budgetMatch ? parseFloat(budgetMatch[1]) : null;
-      const updateData = { isActive: false };
-      if (realMaxBudget !== null) updateData.maxBudget = realMaxBudget;
-
-      prisma.aiModel
-        .update({ where: { id: configAi.id }, data: updateData })
-        .then(() => console.log(`[Budget Sync] Model ${configAi.modelName} dinonaktifkan`))
-        .catch((e) => console.error("[Budget Sync] Gagal:", e.message));
-
-      reportSystemError(
-        "LLM_BUDGET_EXCEEDED",
-        `💸 Budget API LLM HABIS! Model: ${configAi.modelName}. Budget: $${realMaxBudget || "?"}`,
-        "CRITICAL",
-      ).catch(() => { });
-
-      const err = new Error("Layanan AI sedang dalam pemeliharaan. Tim kami sedang menanganinya.");
-      err.statusCode = 503;
-      err.errorCode = "SERVICE_UNAVAILABLE";
-      throw err;
-    }
-
-    let userEmail = userId;
-    try {
-      const u = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
-      if (u?.email) userEmail = u.email;
-    } catch (_) {
-      /* ignore */
-    }
-
-    reportSystemError(
-      "AI_SERVICE",
-      `AI call gagal setelah ${MAX_RETRIES}x retry. Model: ${configAi.modelName}. Error: ${aiError.message}. User: ${userEmail}`,
-      "CRITICAL",
-    ).catch(() => { });
-
-    const err = new Error(`AI gagal merespons setelah ${MAX_RETRIES} percobaan. Silakan coba lagi nanti.`);
-    err.statusCode = 503;
-    throw err;
-  }
-
-  cache.set(cacheKey, hasil_analisis, 86400);
-
+  // 5. Success Post-Processing
+  setCache(imageFingerprint, featureFingerprint, hasil_analisis);
+  
   const realBilling = calculateRealBilling(llmUsage, configAi, billingBase, billingBase.totalKoinFitur);
 
   return {
@@ -166,6 +77,8 @@ const llmNode = async (state) => {
     llmUsage,
     realBilling,
     totalDipotong: realBilling.totalDipotong,
+    imageFingerprint,
+    featureFingerprint,
   };
 };
 

@@ -15,7 +15,7 @@ const billingNode = async (state) => {
 
   assertValidAnalyzeUpload(state);
 
-  checkRateLimit(userId);
+  await checkRateLimit(userId);
 
   await compressImageIfNeeded(file);
 
@@ -63,6 +63,7 @@ const billingNode = async (state) => {
         featHairAnalysis: false,
         featRiskAnalysis: false,
         featBarberInstructions: false,
+        // Free trial: coba Virtual Try-On 1x; fitur premium lain lewat FREE_TRIAL_BLOCKED_FEATURES
         featVirtualTryOn: true,
         virtualTryOnLimit: 1,
         featHistory: true,

@@ -103,6 +103,6 @@ router.get("/ai-history", getAiHistory);
  *         description: Berhasil mengambil riwayat transaksi
  */
 router.get("/transactions", getTransactions);
-router.get("/:id/resolve-email", resolveUserEmail);
+// router.get("/:id/resolve-email", resolveUserEmail); // MOVED TO ADMIN ROUTES FOR SECURITY
 
 module.exports = router;

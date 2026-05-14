@@ -8,6 +8,53 @@ const prisma = require("../../../config/prisma");
 const { resolveChatCompletionsPostUrl } = require("./openAiUrl");
 const { normalizeOpenAiCompatibleUsage } = require("../billing");
 
+/** Ekstrak gambar dari satu choice.message (chat completions + image). */
+function extractImageFromChatMessage(msg) {
+  if (!msg) return null;
+
+  if (Array.isArray(msg.content)) {
+    for (const part of msg.content) {
+      if (part.type === "image_url" && part.image_url?.url) {
+        const u = String(part.image_url.url).replace(/\s/g, "");
+        const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+=*)/i);
+        if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
+        if (u.startsWith("http")) return { type: "url", value: part.image_url.url.trim() };
+      }
+    }
+  }
+
+  if (Array.isArray(msg.images)) {
+    for (const img of msg.images) {
+      if (img.image_url?.url) {
+        const u = String(img.image_url.url).replace(/\s/g, "");
+        const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+=*)/i);
+        if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
+        if (String(img.image_url.url).trim().startsWith("http")) {
+          return { type: "url", value: img.image_url.url.trim() };
+        }
+      }
+    }
+  }
+
+  if (msg.content && typeof msg.content === "string") {
+    const compact = msg.content.replace(/\s/g, "");
+    const dataMatch = compact.match(/data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+=*)/i);
+    if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
+
+    const rawB64 = msg.content.replace(/```[a-z]*\n?/g, "").replace(/\s/g, "").trim();
+    if (rawB64.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(rawB64.substring(0, 200))) {
+      return { type: "base64", mime: "jpeg", value: rawB64 };
+    }
+
+    const mdImgMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
+    if (mdImgMatch?.[1]) return { type: "url", value: mdImgMatch[1] };
+    const urlMatch = msg.content.match(/(https?:\/\/[^\s]+(?:png|jpe?g|webp|gif|avif)[^\s]*)/i);
+    if (urlMatch?.[1]) return { type: "url", value: urlMatch[1] };
+  }
+
+  return null;
+}
+
 /** Ambil blok usage dari respons chat completions (OpenAI / MAIA). */
 function extractUsageFromChatCompletionResponse(data) {
   const top = data?.usage;
@@ -32,7 +79,7 @@ const generateVirtualTryOn = async (configImageGen, file, hasilAnalisis, userPac
     if (isFreeTrial) limit = 1;
 
     const rekomendasiGaya = hasilAnalisis.rekomendasi_gaya || [];
-    const targets = rekomendasiGaya.slice(0, limit).map(r => r.nama_gaya);
+    let targets = rekomendasiGaya.slice(0, limit).map((r) => r.nama_gaya);
     if (targets.length === 0) {
       targets.push(hasilAnalisis.try_on_config?.gaya_target || "modern haircut");
     }
@@ -130,53 +177,9 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
 
         if (msg) {
           let extractedBase64 = null;
-
-          // Parsing Logic (SAMA PERSIS)
-          if (msg.content && typeof msg.content === "string") {
-            const b64Match = msg.content.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
-            if (b64Match) extractedBase64 = b64Match[1];
-          }
-          if (!extractedBase64 && Array.isArray(msg.images)) {
-            for (const img of msg.images) {
-              if (img.image_url?.url) {
-                const dataMatch = img.image_url.url.match(/data:image\/[^;]+;base64,(.+)/);
-                if (dataMatch) { extractedBase64 = dataMatch[1]; break; }
-                else if (img.image_url.url.startsWith("http")) {
-                  extractedUrl = img.image_url.url;
-                  break;
-                }
-              }
-            }
-          }
-          if (!extractedBase64 && Array.isArray(msg.content)) {
-            for (const part of msg.content) {
-              if (part.type === "image_url" && part.image_url?.url) {
-                const dataMatch = part.image_url.url.match(/data:image\/[^;]+;base64,(.+)/);
-                if (dataMatch) { extractedBase64 = dataMatch[1]; break; }
-                else if (part.image_url.url.startsWith("http")) {
-                  extractedUrl = part.image_url.url;
-                  break;
-                }
-              }
-            }
-          }
-          if (!extractedBase64 && msg.content && typeof msg.content === "string") {
-            const rawB64 = msg.content.replace(/```[a-z]*\n?/g, "").replace(/\n/g, "").trim();
-            if (rawB64.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(rawB64.substring(0, 100))) {
-              extractedBase64 = rawB64;
-            }
-          }
-          if (!extractedBase64 && !extractedUrl && msg.content && typeof msg.content === "string") {
-            const mdImgMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
-            if (mdImgMatch && mdImgMatch[1]) {
-              extractedUrl = mdImgMatch[1];
-            } else {
-              const urlMatch = msg.content.match(/(https?:\/\/[^\s]+(?:png|jpe?g|webp|gif|avif)[^\s]*)/i);
-              if (urlMatch && urlMatch[1]) {
-                extractedUrl = urlMatch[1];
-              }
-            }
-          }
+          const extracted = extractImageFromChatMessage(msg);
+          if (extracted?.type === "base64") extractedBase64 = extracted.value;
+          else if (extracted?.type === "url") extractedUrl = extracted.value;
 
           if (extractedBase64) {
             const genFileName = `tryon-${Date.now()}-${index}-${cleanName.replace(/\.[^.]+$/, "")}.webp`;
