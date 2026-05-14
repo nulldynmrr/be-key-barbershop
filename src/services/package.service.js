@@ -51,6 +51,34 @@ const SUBSCRIPTION_PACKAGE_PRISMA_KEYS = new Set([
   "diskonAkhir",
 ]);
 
+/**
+ * Promo dianggap aktif hanya jika rentang tanggal valid — selaras dengan `getAllPackages` (harga_bayar).
+ * @param {object} pkg — baris SubscriptionPackage dari Prisma
+ * @param {Date} [at]
+ * @returns {boolean}
+ */
+function isPackagePromoActiveAt(pkg, at = new Date()) {
+  if (!pkg?.promoAktif || pkg.hargaDiskon == null || !pkg.diskonMulai || !pkg.diskonAkhir) {
+    return false;
+  }
+  const t0 = new Date(pkg.diskonMulai);
+  const t1 = new Date(pkg.diskonAkhir);
+  return at >= t0 && at <= t1;
+}
+
+/**
+ * Harga IDR yang dibayar pembeli (harga diskon jika promo aktif, selain itu harga nominal).
+ * Dipakai saat mencatat `Transaction.nominal` agar dashboard pendapatan = uang masuk nyata.
+ * @param {object} pkg
+ * @param {Date} [at]
+ * @returns {number}
+ */
+function getEffectivePackagePriceIdr(pkg, at = new Date()) {
+  if (!pkg) return 0;
+  if (isPackagePromoActiveAt(pkg, at)) return Math.round(Number(pkg.hargaDiskon));
+  return Math.round(Number(pkg.hargaNominal) || 0);
+}
+
 // Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
   const {
@@ -195,13 +223,7 @@ const getAllPackages = async (page = 1, limit = 10) => {
   const now = new Date();
 
   const formattedPackages = packages.map((pkg) => {
-    const isPromoValid =
-      pkg.promoAktif &&
-      pkg.hargaDiskon &&
-      pkg.diskonMulai &&
-      pkg.diskonAkhir &&
-      now >= new Date(pkg.diskonMulai) &&
-      now <= new Date(pkg.diskonAkhir);
+    const isPromoValid = isPackagePromoActiveAt(pkg, now);
 
     let durasi_display = "Selamanya";
     if (pkg.durationDays) {
@@ -411,5 +433,7 @@ module.exports = {
   createNewPackage,
   updatePackageById,
   deletePackageById,
-  togglePackageStatus
+  togglePackageStatus,
+  isPackagePromoActiveAt,
+  getEffectivePackagePriceIdr,
 };

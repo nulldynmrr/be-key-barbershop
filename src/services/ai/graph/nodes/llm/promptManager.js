@@ -9,9 +9,10 @@ exports.getFingerprints = (fileBuffer, activeFeatures) => {
   return { imageFingerprint, featureFingerprint };
 };
 
-exports.preparePrompts = (activeFeatures, staleAnalysis, refreshWindowDays) => {
+exports.preparePrompts = (activeFeatures, staleAnalysis, refreshWindowDays, source) => {
   return buildDynamicPrompt(activeFeatures, {
     staleRefreshPreviousAnalysis: staleAnalysis,
     staleRefreshPeriodDays: refreshWindowDays,
+    source,
   });
 };

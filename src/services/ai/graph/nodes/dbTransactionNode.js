@@ -34,6 +34,21 @@ const dbTransactionNode = async (state) => {
 
   const resultTx = await prisma.$transaction(async (tx) => {
     let aiRecord = null;
+    
+    // Fetch system config and current user status for historical snapshot
+    const [config, fullUser] = await Promise.all([
+      tx.systemConfig.findUnique({ where: { id: 1 } }),
+      tx.user.findUnique({
+        where: { id: userId },
+        include: { active_package: true }
+      })
+    ]);
+
+    const multiplier = config?.globalMultiplier || 1.35;
+    const membershipName = isFreeTrial ? "FREE" : (fullUser?.active_package?.namaPaket || "FREE");
+    
+    // Charge for user: 0 if FREE, otherwise cost * multiplier
+    const calcChargeUsd = (cost) => isFreeTrial ? 0 : (Number(cost) * multiplier);
 
     // Hanya CREATE — tidak menghapus/update history lama; daftar history user menumpuk selamanya.
     if (saveToHistory) {
@@ -45,6 +60,7 @@ const dbTransactionNode = async (state) => {
           url_foto_upload,
           url_hasil_img: mockTryOnImage,
           hasil_analisis,
+          features_used: JSON.stringify(activeFeatures),
           harga_credit_terpakai: finalTotalDipotong,
         },
       });
@@ -63,6 +79,8 @@ const dbTransactionNode = async (state) => {
         features_used: JSON.stringify(activeFeatures),
         user_id: userId,
         ai_generation_id: aiRecord?.id || null,
+        membership_snapshot: membershipName,
+        charge_usd: calcChargeUsd(realBilling.realCostUsd),
       },
     });
 
@@ -89,6 +107,8 @@ const dbTransactionNode = async (state) => {
           features_used: JSON.stringify(["VIRTUAL_TRY_ON"]),
           user_id: userId,
           ai_generation_id: aiRecord?.id || null,
+          membership_snapshot: membershipName,
+          charge_usd: calcChargeUsd(igCost),
         },
       });
     }
@@ -106,7 +126,7 @@ const dbTransactionNode = async (state) => {
       throw err;
     }
 
-    const amountToDeduct = isFreeTrial ? currentUser.sisa_credit : finalTotalDipotong;
+    const amountToDeduct = isFreeTrial ? Math.min(currentUser.sisa_credit, finalTotalDipotong) : finalTotalDipotong;
     const sisa_credit_after = Math.max(0, currentUser.sisa_credit - amountToDeduct);
 
     await tx.user.update({

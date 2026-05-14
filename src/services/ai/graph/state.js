@@ -15,6 +15,10 @@ const FaceAnalysisStateAnnotation = Annotation.Root({
     value: (_, newVal) => newVal,
     default: () => [],
   }),
+  source: Annotation({
+    value: (_, newVal) => newVal,
+    default: () => "file",
+  }),
 
   // Diisi billingNode; diperlukan node berikutnya 
   user: Annotation({

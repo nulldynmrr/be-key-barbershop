@@ -29,7 +29,7 @@ exports.getCache = async ({ imageFingerprint, featureFingerprint, refreshWindowD
         feature_fingerprint: featureFingerprint,
       },
       orderBy: { tgl_generate: "desc" },
-      select: { hasil_analisis: true, tgl_generate: true },
+      select: { hasil_analisis: true, tgl_generate: true, url_hasil_img: true },
     });
 
     if (existing?.hasil_analisis) {
@@ -45,7 +45,7 @@ exports.getCache = async ({ imageFingerprint, featureFingerprint, refreshWindowD
             billingBase,
             billingBase.totalKoinFitur,
           );
-          return { hasil_analisis: fromDb, realBilling, hit: "DB" };
+          return { hasil_analisis: fromDb, realBilling, hit: "DB", url_hasil_img: existing.url_hasil_img };
         }
       }
       return { staleAnalysis: cloneJsonSafe(existing.hasil_analisis) };

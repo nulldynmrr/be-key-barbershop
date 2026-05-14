@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { success, error: sendError } = require("../utils/response.helper");
+const { getEffectivePackagePriceIdr } = require("../services/package.service");
 
 exports.createPayment = async (req, res) => {
   // Placeholder: integrasi Payment Gateway (Midtrans/Duitku)
@@ -45,11 +46,13 @@ exports.buyPackage = async (req, res) => {
       },
     });
 
+    const nominalDibayar = getEffectivePackagePriceIdr(pkg);
+
     await prisma.transaction.create({
       data: {
         user_id: userId,
         jenis_transaksi: "BUY_PACKAGE",
-        nominal: pkg.hargaNominal,
+        nominal: nominalDibayar,
         status: "SUCCESS",
       },
     });

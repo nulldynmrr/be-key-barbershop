@@ -8,12 +8,25 @@ const { FEATURE_PROMPTS, FEATURE_PROMPT_LOAD_ORDER } = require("../prompts/featu
  * @returns {{ systemInstruction: string, promptText: string }}
  */
 const buildDynamicPrompt = (activeFeatures, options = {}) => {
-  const { staleRefreshPreviousAnalysis, staleRefreshPeriodDays = 30 } = options;
+  const { staleRefreshPreviousAnalysis, staleRefreshPeriodDays = 30, source = "file" } = options;
   const currentYear = new Date().getFullYear();
   const templateFields = [...basePrompt.templateFields];
   const rekomendasiFields = [...basePrompt.rekomendasiFields];
   const systemSections = [];
   const promptSections = [];
+
+  if (source === "camera") {
+    systemSections.push(
+      `- KONTEKS: Foto ini diambil langsung dari kamera aplikasi (webcam/kamera HP).`,
+      `- TOLERANSI NOISE: ABAIKAN grain, noise, atau bintik-bintik akibat sensor kamera di cahaya rendah.`,
+      `- JANGAN gunakan LLM untuk mencari kesalahan teknis gambar. Selama siluet wajah (mata, hidung, mulut) teridentifikasi, WAJIB set 'kualitas_foto_ok': true.`
+    );
+  } else {
+    systemSections.push(
+      `- KONTEKS: Foto ini diunggah dari galeri/file.`,
+      `- ANALISIS DETAIL: Lakukan analisis dengan tingkat ketelitian tinggi pada detail tekstur rambut dan proporsi biometrik wajah.`
+    );
+  }
 
   // Merge prompt modul fitur (require statis lewat featurePromptRegistry.js)
   for (const featureKey of FEATURE_PROMPT_LOAD_ORDER) {
@@ -33,7 +46,8 @@ const buildDynamicPrompt = (activeFeatures, options = {}) => {
     }
   }
 
-  // Fallback if BARBER_INSTRUCTIONS is not active
+
+  // Fallback jika BARBER_INSTRUCTIONS tidak aktif — field JSON tetap ada (perilaku lama, tidak menghapus data).
   if (!activeFeatures.includes("BARBER_INSTRUCTIONS")) {
     templateFields.push(`  "instruksi_barber": string`);
     promptSections.push(`- Isi 'instruksi_barber' dengan instruksi singkat untuk barber.`);

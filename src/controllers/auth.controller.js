@@ -118,7 +118,15 @@ exports.requestOTP = async (req, res) => {
     });
   }
 
-  // Quick domain validation to prevent obvious async bounces
+  // 1. Rate Limiting / Cooldown Check (1 minute)
+  if (cache.get(`otp_cooldown_${email}`)) {
+    return res.status(429).json({
+      success: false,
+      message: "Tunggu 1 menit sebelum meminta OTP lagi.",
+    });
+  }
+
+  // 2. Quick domain validation
   const domain = email.split("@")[1];
   try {
     const mx = await dns.resolveMx(domain);
@@ -133,28 +141,32 @@ exports.requestOTP = async (req, res) => {
   }
 
   const otp = crypto.randomInt(100000, 999999).toString();
-
   const expires = new Date(Date.now() + 5 * 60 * 1000);
 
   try {
-    // 1. Send OTP first. If fails, no record created anywhere.
+    // 3. Send OTP
     await mailService.sendOTP(email, otp);
 
-    // 2. If email success, then store OTP in database ONLY if user exists
-    // (requestOTP is typically for existing users or forgot password flow)
+    // 4. Set Cooldown
+    cache.set(`otp_cooldown_${email}`, true, 60);
+
+    // 5. Update DB or Cache
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
       await prisma.user.update({
         where: { email },
-        data: {
-          otp,
-          otpExpires: expires,
-        },
+        data: { otp, otpExpires: expires },
       });
     } else {
-      // If it's a new user requesting OTP (not through register), 
-      // we store in cache for consistency with the new registration flow.
-      cache.set(`pending_otp_${email}`, { otp, expires }, 5 * 60);
+      // Check if there is a pending registration
+      const pendingReg = cache.get(`pending_reg_${email}`);
+      if (pendingReg) {
+        // Update the existing pending registration with new OTP
+        cache.set(`pending_reg_${email}`, { ...pendingReg, otp, otpExpires: expires }, 5 * 60);
+      } else {
+        // Fallback for other cases
+        cache.set(`pending_otp_${email}`, { otp, otpExpires: expires }, 5 * 60);
+      }
     }
 
     return success(res, { message: "OTP sedang dikirim!" });
@@ -168,47 +180,61 @@ exports.verifyOTP = async (req, res) => {
     const { email, otp } = req.body;
 
     // 1. Check for Pending Registration in Cache
-    const pendingReg = cache.get(`pending_reg_${email}`);
+    let pendingData = cache.get(`pending_reg_${email}`) || cache.get(`pending_otp_${email}`);
     
-    if (pendingReg) {
-      if (String(pendingReg.otp) !== String(otp)) {
+    if (pendingData) {
+      if (String(pendingData.otp) !== String(otp)) {
         return res.status(400).json({ success: false, message: "OTP salah" });
       }
 
-      if (new Date() > new Date(pendingReg.otpExpires)) {
+      // Strict Expiry Check using getTime() to avoid timezone/object issues
+      const now = Date.now();
+      const expiry = new Date(pendingData.otpExpires).getTime();
+
+      if (now > expiry) {
         cache.delete(`pending_reg_${email}`);
+        cache.delete(`pending_otp_${email}`);
         return res.status(400).json({ success: false, message: "OTP kadaluarsa" });
       }
 
-      // OTP Correct! Now move from Cache to DB
-      const user = await prisma.user.upsert({
-        where: { email: pendingReg.email },
-        update: {
-          nama: pendingReg.nama,
-          password: pendingReg.password,
-          otp: null,
-          otpExpires: null
-        },
-        create: {
-          nama: pendingReg.nama,
-          email: pendingReg.email,
-          password: pendingReg.password,
-          role: "user",
-          tipe_akun: "free",
-          sisa_credit: 3,
-          agreed_to_terms: true,
-          agreed_at: new Date(),
-        },
-      });
+      // If it was a pending registration, move to DB
+      let user;
+      if (pendingData.nama && pendingData.password) {
+        user = await prisma.user.upsert({
+          where: { email: pendingData.email },
+          update: {
+            nama: pendingData.nama,
+            password: pendingData.password,
+            otp: null,
+            otpExpires: null
+          },
+          create: {
+            nama: pendingData.nama,
+            email: pendingData.email,
+            password: pendingData.password,
+            role: "user",
+            tipe_akun: "free",
+            sisa_credit: 3,
+            agreed_to_terms: true,
+            agreed_at: new Date(),
+          },
+        });
+      } else {
+        // Just a simple OTP verification (like forgot password for non-existent user? unlikely but handled)
+        user = await prisma.user.findUnique({ where: { email } });
+      }
 
       // Cleanup cache
       cache.delete(`pending_reg_${email}`);
+      cache.delete(`pending_otp_${email}`);
 
-      const authToken = generateToken(user);
-      return success(res, { 
-        message: "Registrasi & Verifikasi Berhasil", 
-        data: { token: authToken, user } 
-      });
+      if (user) {
+        const authToken = generateToken(user);
+        return success(res, { 
+          message: "Verifikasi Berhasil", 
+          data: { token: authToken, user } 
+        });
+      }
     }
 
     // 2. Fallback to Database (for Forgot Password or existing Unverified users)
@@ -218,7 +244,10 @@ exports.verifyOTP = async (req, res) => {
       return res.status(400).json({ success: false, message: "OTP salah" });
     }
 
-    if (new Date() > user.otpExpires) {
+    const now = Date.now();
+    const expiry = new Date(user.otpExpires).getTime();
+
+    if (now > expiry) {
       return res.status(400).json({ success: false, message: "OTP kadaluarsa" });
     }
 
@@ -412,6 +441,14 @@ exports.userRegister = async (req, res) => {
 
     const { nama, email, password } = validation.data;
 
+    // Rate Limiting / Cooldown Check (1 minute)
+    if (cache.get(`otp_cooldown_${email}`)) {
+      return res.status(429).json({
+        success: false,
+        message: "Tunggu 1 menit sebelum meminta OTP lagi.",
+      });
+    }
+
     const existingUser = await prisma.user.findUnique({
       where: {
         email,
@@ -452,7 +489,10 @@ exports.userRegister = async (req, res) => {
     // 1. Send OTP FIRST
     await mailService.sendOTP(email, otp);
 
-    // 2. STORE IN CACHE, NOT DATABASE
+    // 2. Set Cooldown for 1 minute
+    cache.set(`otp_cooldown_${email}`, true, 60);
+
+    // 3. STORE IN CACHE, NOT DATABASE
     // This keeps the User table clean until verified.
     cache.set(`pending_reg_${email}`, {
       nama,

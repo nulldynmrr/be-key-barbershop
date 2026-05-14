@@ -15,6 +15,7 @@ const {
   calculateIdealKoin,
   getAiModelBalance,
   syncModelBalance,
+  parseCurl,
 } = require("../controllers/aiconfig.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
@@ -346,5 +347,6 @@ router.put("/feature-pricing/:id", updateFeaturePrice);
  *         description: Hasil estimasi koin ideal per 1 generate
  */
 router.post("/calculate-ideal-koin", calculateIdealKoin);
+router.post("/parse-curl", parseCurl);
 
 module.exports = router;

@@ -5,6 +5,7 @@ const { llmNode } = require("./graph/nodes/llmNode");
 const { imageGenNode } = require("./graph/nodes/imageGenNode");
 const { dbTransactionNode } = require("./graph/nodes/dbTransactionNode");
 const { routeAfterLLM } = require("./graph/edges/routingEdges");
+const { inferJenisRambut } = require("./graph/nodes/llm/llmResponseParser");
 
 const workflow = new StateGraph(FaceAnalysisStateAnnotation)
   .addNode("billingNode", billingNode)
@@ -28,11 +29,12 @@ const compiledGraph = workflow.compile();
  * @param {string[]} requestedFeatures
  * @returns {object}
  */
-const processFaceAnalysis = async (userId, file, requestedFeatures) => {
+const processFaceAnalysis = async (userId, file, requestedFeatures, source = "file") => {
   const initialState = {
     userId,
     file,
     requestedFeatures,
+    source,
   };
 
   let finalState;
@@ -56,15 +58,19 @@ const processFaceAnalysis = async (userId, file, requestedFeatures) => {
     }
   }
 
+  const hasil = finalState.hasil_analisis;
+  const hasilNormalized =
+    hasil && typeof hasil === "object" ? { ...hasil, jenis_rambut: inferJenisRambut(hasil) } : hasil;
+
   return {
-    kualitas_ok: finalState.hasil_analisis?.kualitas_foto_ok,
-    alasan: finalState.hasil_analisis?.alasan_kualitas || null,
+    kualitas_ok: hasilNormalized?.kualitas_foto_ok,
+    alasan: hasilNormalized?.alasan_kualitas || null,
     totalDipotong: finalState.totalDipotong,
     totalKoinFitur: finalState.billingBase?.totalKoinFitur,
     realKoinAi: finalState.realBilling?.realKoinAi,
     imageGenKoin: finalState.imageGenKoin ?? 0,
     activeFeatures: finalState.activeFeatures,
-    hasil_analisis: finalState.hasil_analisis,
+    hasil_analisis: hasilNormalized,
     resultTx: finalState.resultTx,
     total_tokens: finalState.llmUsage?.total_tokens || 0,
     realCostUsd: finalState.realBilling?.realCostUsd,

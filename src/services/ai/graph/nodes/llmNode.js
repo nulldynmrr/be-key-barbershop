@@ -9,7 +9,7 @@ const { invokeLLM } = require("./llm/llmInvoker");
  * Orchestrates Cache, Prompting, and LLM Invocation
  */
 const llmNode = async (state) => {
-  const { userId, file, activeFeatures, configAi, billingBase, imageBase64, userPackage, isFreeTrial } = state;
+  const { userId, file, activeFeatures, configAi, billingBase, imageBase64, userPackage, isFreeTrial, source } = state;
 
   // 1. Validation
   if (!file?.buffer || !Buffer.isBuffer(file.buffer)) {
@@ -48,6 +48,7 @@ const llmNode = async (state) => {
       totalDipotong: cacheResult.realBilling.totalDipotong,
       imageFingerprint,
       featureFingerprint,
+      generatedImageUrls: cacheResult.url_hasil_img || [],
     };
   }
 
@@ -55,7 +56,8 @@ const llmNode = async (state) => {
   const { systemInstruction, promptText } = preparePrompts(
     activeFeatures, 
     cacheResult?.staleAnalysis, 
-    refreshWindowDays
+    refreshWindowDays,
+    source
   );
 
   const { hasil_analisis, llmUsage } = await invokeLLM({

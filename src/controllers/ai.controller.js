@@ -30,7 +30,8 @@ exports.analyzeFace = async (req, res) => {
     const result = await aiService.processFaceAnalysis(
       req.user.id,
       req.file,
-      validation.data.requestedFeatures
+      validation.data.requestedFeatures,
+      req.body.source
     );
 
     return success(res, {
@@ -102,3 +103,4 @@ exports.getAvailableFeatures = async (req, res) => {
     });
   }
 };
+

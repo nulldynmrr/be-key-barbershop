@@ -75,9 +75,10 @@ model AIGeneration {
   user_id               String
   image_hash            String?        @db.VarChar(64)
   feature_fingerprint   String?        @db.VarChar(64)
-  url_foto_upload       String
+  url_foto_upload       String         @db.Text
   url_hasil_img         Json?
   hasil_analisis        Json
+  features_used         String?        @db.Text
   harga_credit_terpakai Int
   tgl_generate          DateTime       @default(now())
   user                  User           @relation(fields: [user_id], references: [id])
@@ -99,6 +100,9 @@ model SystemApiLog {
   service_fee_koin  Int     @default(0)
   token_fee_koin    Int     @default(0)
   features_used     String? @db.Text
+
+  membership_snapshot String?
+  charge_usd          Decimal @default(0) @db.Decimal(10, 6)
 
   user_id          String?
   ai_generation_id String?

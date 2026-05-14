@@ -79,8 +79,22 @@ const getAiHistory = async (req, res, next) => {
       }),
     ]);
 
+    const formattedHistory = history.map(item => {
+      let activeFeatures = [];
+      try {
+        activeFeatures = item.features_used ? JSON.parse(item.features_used) : [];
+      } catch (e) {
+        activeFeatures = item.features_used ? item.features_used.split(',') : [];
+      }
+      return {
+        ...item,
+        active_features: activeFeatures,
+        activeFeatures: activeFeatures // for redundancy
+      };
+    });
+
     return success(res, {
-      data: history,
+      data: formattedHistory,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {

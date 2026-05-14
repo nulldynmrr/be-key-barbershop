@@ -148,10 +148,12 @@ exports.saveAiModel = async (req, res, next) => {
     const modelData = {
       namaRouter, baseUrl, modelName,
       typeAi, pricingUnit: resolvedUnit,
-      hargaInput1M: Number(hargaInput1M) || 0, // selalu berlaku untuk semua tipe
+      hargaInput1M: Number(hargaInput1M) || 0,
       hargaOutput1M: resolvedUnit === "TOKEN" ? Number(hargaOutput1M) || 0 : 0,
       hargaPerImage: resolvedUnit === "IMAGE" ? Number(hargaPerImage) || 0 : 0,
-      maxBudget, rpmLimit, isActive,
+      maxBudget: parseFloat(maxBudget) || 0,
+      rpmLimit: parseInt(rpmLimit) || 0,
+      isActive,
     };
 
     let modelConfig;
@@ -248,6 +250,84 @@ exports.testConnection = async (req, res, next) => {
   }
 };
 
+exports.parseCurl = async (req, res, next) => {
+  try {
+    const { curl } = req.body;
+    if (!curl) return res.status(400).json({ success: false, message: "CURL string is required" });
+
+    // 1. Extract URL (Better regex: look specifically for http/https and stop at quotes or spaces)
+    const urlMatch = curl.match(/https?:\/\/[^\s'"]+/);
+    let fullUrl = urlMatch ? urlMatch[0] : "";
+    
+    // Clean up trailing slashes or quotes if any
+    fullUrl = fullUrl.replace(/['"]$/, "");
+
+    // 2. Extract API Key (Bearer token) - handle more variations
+    const authMatch = curl.match(/Bearer\s+([a-zA-Z0-9\-_.]+)/i);
+    const apiKey = authMatch ? authMatch[1] : "";
+
+    // 3. Extract JSON Data and Model Name
+    // Look for "model": "..." or 'model': '...'
+    const modelMatch = curl.match(/["']model["']\s*:\s*["']([^"']+)["']/);
+    let modelName = modelMatch ? modelMatch[1] : "";
+
+    // If still not found, try to parse data segment
+    if (!modelName) {
+      const dataMatch = curl.match(/--data(?:-raw)?\s+['"]({[^'"]+})['"]/);
+      if (dataMatch) {
+        try {
+          const jsonData = JSON.parse(dataMatch[1]);
+          modelName = jsonData.model || "";
+        } catch (e) {}
+      }
+    }
+
+    let typeAi = "CHAT";
+    let pricingUnit = "TOKEN";
+
+    // 4. Determine Type and Base URL
+    let baseUrl = fullUrl;
+    if (fullUrl.includes("/chat/completions")) {
+      typeAi = "CHAT";
+      pricingUnit = "TOKEN";
+      baseUrl = fullUrl.replace("/chat/completions", "");
+    } else if (fullUrl.includes("/images/generations")) {
+      typeAi = "IMAGE_GENERATION";
+      pricingUnit = "IMAGE";
+      baseUrl = fullUrl.replace("/images/generations", "");
+    } else if (fullUrl.includes("/images/edits")) {
+      typeAi = "IMAGE_EDIT";
+      pricingUnit = "IMAGE";
+      baseUrl = fullUrl.replace("/images/edits", "");
+    }
+
+    // Standardize Base URL (ensure /v1 suffix if it was in the original URL)
+    if (!baseUrl.endsWith("/v1") && fullUrl.includes("/v1/")) {
+       const v1Index = fullUrl.indexOf("/v1");
+       if (v1Index !== -1) {
+         baseUrl = fullUrl.substring(0, v1Index + 3);
+       }
+    }
+
+    // Fallback for namaRouter if modelName is empty
+    const displayRouterName = modelName ? (modelName.split("/").pop() || modelName) : "New Model";
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        namaRouter: displayRouterName,
+        modelName: modelName,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        typeAi: typeAi,
+        pricingUnit: pricingUnit
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: "Gagal memproses CURL: " + error.message });
+  }
+};
+
 exports.getAiUsageLogs = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -275,13 +355,25 @@ exports.getAiUsageLogs = async (req, res, next) => {
     const globalMultiplier = config?.globalMultiplier || 1.35;
     const formattedLogs = logs.map((log) => {
       const modalUsd = Number(log.cost_usd);
-      const chargeUsd = modalUsd * globalMultiplier;
+      
+      // Use historical snapshot if available, otherwise fallback to dynamic calculation (for old data)
+      const userStatus = log.membership_snapshot 
+        ? log.membership_snapshot.toUpperCase()
+        : (log.user?.active_package?.namaPaket ? log.user.active_package.namaPaket.toUpperCase() : "FREE");
+
+      // For chargeUser: if snapshot exists (even if 0), use it. 
+      // If snapshot is null (old data), calculate dynamically.
+      const chargeUsd = log.membership_snapshot !== null
+        ? Number(log.charge_usd)
+        : (modalUsd * globalMultiplier);
+
       const profitUsd = chargeUsd - modalUsd;
+
       return {
         id: log.id,
         createdAt: log.tgl_penggunaan,
         userEmail: log.user?.email || "Guest",
-        userStatus: log.user?.active_package?.namaPaket ? log.user.active_package.namaPaket.toUpperCase() : "FREE",
+        userStatus: userStatus,
         promptTokens: log.input_tokens,
         completionTokens: log.output_tokens,
         modalApi: modalUsd.toFixed(5),

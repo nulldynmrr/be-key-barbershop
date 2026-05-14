@@ -21,6 +21,21 @@ const imageGenNode = async (state) => {
     console.log(`[LangGraph imageGenNode] Starting Virtual Try-On...`);
   }
 
+  // [CRITICAL AUDIT] Only skip if photo is bad AND no recommendations were provided.
+  // If the AI was confident enough to provide styles, we should attempt to generate images.
+  const hasRecommendations = hasil_analisis?.rekomendasi_gaya && hasil_analisis.rekomendasi_gaya.length > 0;
+  if (hasil_analisis?.kualitas_foto_ok === false && !hasRecommendations) {
+    if (process.env.DEBUG_AI_GRAPH === "1") {
+      console.log(`[LangGraph imageGenNode] Skipping image generation because photo quality is poor and no recommendations were provided.`);
+    }
+    return {
+      generatedImageUrls: [],
+      imageGenCostUsd: 0,
+      imageGenUsage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      imageGenKoin: 0,
+    };
+  }
+
   try {
     const tryOnResult = await generateVirtualTryOn(
       configImageGen,

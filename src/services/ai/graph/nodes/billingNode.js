@@ -69,8 +69,8 @@ const billingNode = async (state) => {
         featRiskAnalysis: false,
         featBarberInstructions: false,
         // Free trial: coba Virtual Try-On 1x; fitur premium lain lewat FREE_TRIAL_BLOCKED_FEATURES
-        featVirtualTryOn: true,
-        virtualTryOnLimit: 1,
+        featVirtualTryOn: false,
+        virtualTryOnLimit: 0,
         featHistory: true,
         featTrendAnalysis: false,
         hargaNominal: 750,
@@ -150,11 +150,32 @@ const billingNode = async (state) => {
   }
 
   const imageBase64 = file.buffer.toString("base64");
-  const cleanName = file.originalname.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9.-]/g, "").substring(0, 50);
-  const url_foto_upload = `/uploads/ai_results/${Date.now()}-${cleanName}`;
-  const uploadDir = path.join(process.cwd(), "uploads", "ai_results");
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-  await fs.promises.writeFile(path.join(process.cwd(), url_foto_upload), file.buffer);
+  
+  // Use existing path if it's already in ai_results (from Multer + OptimizeImage)
+  let url_foto_upload = "";
+  const relativeFromPath = file.path ? file.path.replace(/\\/g, "/").replace(/.*uploads\/ai_results\//, "uploads/ai_results/") : null;
+  
+  if (relativeFromPath && relativeFromPath.includes("uploads/ai_results/")) {
+    url_foto_upload = `/${relativeFromPath}`;
+  } else {
+    // Fallback: Save buffer to ai_results if path is missing or elsewhere
+    const rawName = file.originalname || "camera-capture.jpg";
+    const cleanName = rawName.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9.-]/g, "").substring(0, 50);
+    const fileName = `${Date.now()}-${cleanName}${file.mimetype === "image/webp" ? ".webp" : ""}`;
+    const uploadDir = path.join(process.cwd(), "uploads", "ai_results");
+    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+    
+    const filePath = path.join(uploadDir, fileName);
+    await fs.promises.writeFile(filePath, file.buffer);
+    url_foto_upload = `/uploads/ai_results/${fileName}`;
+  }
+
+  const cleanName = path.basename(url_foto_upload);
+
+  if (url_foto_upload.length > 500) {
+    console.error(`[BillingNode] CRITICAL: url_foto_upload is too long (${url_foto_upload.length}). Truncating to prevent DB error. Content starts with: ${url_foto_upload.substring(0, 50)}`);
+    url_foto_upload = url_foto_upload.substring(0, 500);
+  }
 
   return {
     user,

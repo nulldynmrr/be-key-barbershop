@@ -5,6 +5,10 @@ const { normalizeOpenAiBaseUrl } = require("../../../core/openAiUrl");
 const { FaceAnalysisOutputSchema } = require("../../../schemas/analysisOutput.schema");
 const { reportSystemError } = require("../../../../alert.service");
 const prisma = require("../../../../../config/prisma");
+const {
+  normalizeMessageContentToString,
+  parseFaceAnalysisFromLlmText,
+} = require("./llmResponseParser");
 
 const MAX_RETRIES = 3;
 const DATA_URL_MIME_FALLBACK = "image/jpeg";
@@ -32,14 +36,9 @@ exports.invokeLLM = async ({ configAi, systemInstruction, promptText, imageBase6
     configuration: { baseURL },
   });
 
-  const structuredLlm = llm.withStructuredOutput(FaceAnalysisOutputSchema, {
-    name: "face_analysis_output",
-    method: "jsonMode",
-    includeRaw: true,
-  });
-
   const b64 = imageBase64 ?? file.buffer.toString("base64");
-  const mimeForDataUrl = file.mimetype && /^image\/(jpeg|png|webp|gif)$/i.test(file.mimetype)
+  const mimeForDataUrl =
+    file.mimetype && /^image\/(jpeg|png|webp|gif)$/i.test(file.mimetype)
       ? file.mimetype
       : DATA_URL_MIME_FALLBACK;
   const imageDataUrl = `data:${mimeForDataUrl};base64,${b64}`;
@@ -55,19 +54,40 @@ exports.invokeLLM = async ({ configAi, systemInstruction, promptText, imageBase6
   ];
 
   try {
-    const rawResult = await structuredLlm.invoke(messages);
+    const rawResult = await llm.invoke(messages);
     let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-    
-    if (rawResult.raw?.usage_metadata) {
-      const u = rawResult.raw.usage_metadata;
+    if (rawResult.additional_kwargs?.tokenUsage) {
+      const u = rawResult.additional_kwargs.tokenUsage;
       usage = {
-        prompt_tokens: u.input_tokens ?? u.prompt_tokens ?? 0,
-        completion_tokens: u.output_tokens ?? u.completion_tokens ?? 0,
-        total_tokens: u.total_tokens ?? 0,
+        prompt_tokens: u.prompt_tokens || 0,
+        completion_tokens: u.completion_tokens || 0,
+        total_tokens: u.total_tokens || 0,
+      };
+    } else if (rawResult.usage_metadata) {
+      const u = rawResult.usage_metadata;
+      usage = {
+        prompt_tokens: u.input_tokens || 0,
+        completion_tokens: u.output_tokens || 0,
+        total_tokens: u.total_tokens || 0,
       };
     }
 
-    return { hasil_analisis: rawResult.parsed, llmUsage: usage };
+    const textBlob = normalizeMessageContentToString(rawResult.content);
+    const parsed = parseFaceAnalysisFromLlmText(textBlob, FaceAnalysisOutputSchema);
+
+    if (parsed.data) {
+      return { hasil_analisis: parsed.data, llmUsage: usage };
+    }
+
+    const snippet = textBlob ? textBlob.substring(0, 280) : "(empty)";
+    const detail = new Error(`Format data tidak terbaca. Snippet: ${snippet}`);
+    await reportError(userId, configAi, detail);
+
+    const err = new Error("AI memberikan respons tetapi format data tidak terbaca. Silakan coba lagi.");
+    err.statusCode = 422;
+    err.errorCode = "AI_PARSE_ERROR";
+    err.reportedToOps = true;
+    throw err;
   } catch (aiError) {
     const { errorBody, errorMsg } = extractBudgetAndMessage(aiError);
 
@@ -79,9 +99,14 @@ exports.invokeLLM = async ({ configAi, systemInstruction, promptText, imageBase6
       throw err;
     }
 
+    if (aiError.errorCode === "AI_PARSE_ERROR" || aiError.statusCode === 422) {
+      throw aiError;
+    }
+
     await reportError(userId, configAi, aiError);
     const err = new Error(`AI gagal merespons setelah ${MAX_RETRIES} percobaan. Silakan coba lagi nanti.`);
     err.statusCode = 503;
+    err.errorCode = "AI_SERVICE_ERROR";
     throw err;
   }
 };

@@ -19,6 +19,7 @@ const FREE_TRIAL_BLOCKED_FEATURES = [
   "RISK_ANALYSIS",
   "BARBER_INSTRUCTIONS",
   "TREND_ANALYSIS",
+  "VIRTUAL_TRY_ON",
 ];
 
 module.exports = {
