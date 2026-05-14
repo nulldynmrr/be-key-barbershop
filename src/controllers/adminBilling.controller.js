@@ -4,42 +4,26 @@ exports.createPurchase = async (req, res) => {
   try {
     const { nama_paket, kos_total_idr, nominal_usd, jumlah_token } = req.body;
 
-    const baseData = {
-      nama_paket,
-      kos_total_idr: Number(kos_total_idr),
-    };
-
-    const data = {
-      ...baseData,
-      ...(jumlah_token !== undefined && jumlah_token !== null
-        ? { jumlah_token: Number(jumlah_token) }
-        : {}),
-      ...(nominal_usd !== undefined && nominal_usd !== null
-        ? { nominal_usd: Number(nominal_usd) }
-        : {}),
-    };
-
-    let purchase;
-    try {
-      purchase = await prisma.adminTokenPurchase.create({ data });
-    } catch (error) {
-      // Handle perbedaan field schema (jumlah_token vs nominal_usd) tanpa crash.
-      const msg = String(error?.message || "");
-      if (msg.includes("Unknown argument `jumlah_token`")) {
-        const { jumlah_token: _jt, ...dataNoJumlahToken } = data;
-        purchase = await prisma.adminTokenPurchase.create({ data: dataNoJumlahToken });
-      } else if (msg.includes("Unknown argument `nominal_usd`")) {
-        const { nominal_usd: _nu, ...dataNoNominalUsd } = data;
-        purchase = await prisma.adminTokenPurchase.create({ data: dataNoNominalUsd });
-      } else {
-        throw error;
-      }
+    if (!nama_paket || kos_total_idr === undefined || kos_total_idr === null) {
+      return res.status(400).json({
+        success: false,
+        message: "nama_paket dan kos_total_idr wajib diisi",
+      });
     }
 
-    res
-      .status(201)
-      .json({ success: true, message: "Saldo masuk dicatat!", data: purchase });
+    const purchase = await prisma.adminTokenPurchase.create({
+      data: {
+        nama_paket,
+        kos_total_idr: Number(kos_total_idr),
+        nominal_usd: nominal_usd !== undefined && nominal_usd !== null ? Number(nominal_usd) : 0,
+        jumlah_token:
+          jumlah_token !== undefined && jumlah_token !== null ? Number(jumlah_token) : null,
+      },
+    });
+
+    res.status(201).json({ success: true, message: "Saldo masuk dicatat!", data: purchase });
   } catch (error) {
+    console.error("[AdminBilling]", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
