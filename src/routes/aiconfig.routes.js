@@ -13,6 +13,8 @@ const {
   getFeatureToggleMap,
   updateFeaturePrice,
   calculateIdealKoin,
+  getAiModelBalance,
+  syncModelBalance,
 } = require("../controllers/aiconfig.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
@@ -200,6 +202,8 @@ router.delete("/models/:id", deleteAiModel);
  *         description: Status diupdate
  */
 router.patch("/models/:id/status", toggleModelStatus);
+router.get("/models/:id/balance", getAiModelBalance);
+router.post("/models/:id/sync-balance", syncModelBalance);
 
 /**
  * @swagger

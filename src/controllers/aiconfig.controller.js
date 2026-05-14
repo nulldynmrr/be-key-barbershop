@@ -5,6 +5,32 @@ const cache = require("../utils/memoryCache");
 
 const prisma = require("../config/prisma");
 const { success, error: sendError } = require("../utils/response.helper");
+const { resolveBalanceUrl } = require("../services/ai/core/openAiUrl");
+
+// Helper to fetch real balance from AI Provider (MAIA/OpenRouter)
+const fetchModelBalance = async (model) => {
+  try {
+    if (!model.baseUrl || !model.apiKey) return null;
+    
+    const balanceUrl = resolveBalanceUrl(model.baseUrl);
+    const apiKey = decrypt(model.apiKey);
+
+    const response = await axios.get(balanceUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      timeout: 5000 // 5s timeout
+    });
+
+    // MAIA/OpenRouter response usually: { data: { usage: 120, ... }, total_usage: 120 } or { credits: 120 }
+    // Based on user screenshot, MAIA value is around 120.
+    if (response.data) {
+      return response.data.total_usage || response.data.credits || response.data.data?.usage || 0;
+    }
+    return 0;
+  } catch (err) {
+    console.error(`[Balance Fetch] Error for ${model.namaRouter}:`, err.message);
+    return null;
+  }
+};
 
 exports.getExchangeSetting = async (req, res, next) => {
   try {
@@ -67,7 +93,16 @@ exports.getAiModels = async (req, res, next) => {
       };
     });
 
-    return success(res, { data: maskedModels });
+    // Fetch realtime balance for active models (parallel)
+    const modelsWithBalance = await Promise.all(maskedModels.map(async (m) => {
+      if (m.isActive && m.namaRouter.toLowerCase().includes("maia")) {
+        const realtimeBalance = await fetchModelBalance(m);
+        return { ...m, realtimeBalance };
+      }
+      return m;
+    }));
+
+    return success(res, { data: modelsWithBalance });
   } catch (error) {
     next(error);
   }
@@ -191,7 +226,11 @@ exports.testConnection = async (req, res, next) => {
         .json({ success: false, message: "API Key tidak valid untuk ditest" });
     }
 
-    const response = await fetch(`${baseUrl}/models`, {
+    const { normalizeOpenAiBaseUrl } = require("../services/ai/core/openAiUrl");
+    const normalizedRoot = normalizeOpenAiBaseUrl(baseUrl);
+    const testUrl = normalizedRoot ? `${normalizedRoot}/models` : `${baseUrl}/models`;
+
+    const response = await fetch(testUrl, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -414,6 +453,42 @@ exports.calculateIdealKoin = async (req, res, next) => {
         fitur_aktif: Object.entries(featureMap).filter(([, v]) => v).map(([k]) => k),
         catatan: "Koin ideal dihitung dengan asumsi harga referensi Rp 50/koin. Sesuaikan dengan harga paket aktual Anda.",
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getAiModelBalance = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const model = await prisma.aiModel.findUnique({ where: { id } });
+    if (!model) return sendError(res, { message: "Model tidak ditemukan" });
+
+    const balance = await fetchModelBalance(model);
+    return success(res, { data: { balance } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.syncModelBalance = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const model = await prisma.aiModel.findUnique({ where: { id } });
+    if (!model) return sendError(res, { message: "Model tidak ditemukan" });
+
+    const balance = await fetchModelBalance(model);
+    if (balance === null) return sendError(res, { message: "Gagal mengambil saldo dari provider" });
+
+    const updated = await prisma.aiModel.update({
+      where: { id },
+      data: { maxBudget: balance }
+    });
+
+    return success(res, { 
+      message: `Sinkronisasi Berhasil! Max Budget ${model.namaRouter} disesuaikan ke $${balance}`,
+      data: updated 
     });
   } catch (error) {
     next(error);

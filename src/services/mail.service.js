@@ -75,6 +75,20 @@ exports.sendOTP = async (email, otp) => {
     } catch (fallbackError) {
       const detail = `Total Failure: ${error.message} | ${fallbackError.message}`;
       alertService.reportSystemError("Email-Service", detail, "CRITICAL");
+      
+      // Check for common 'Address Not Found' error patterns (SMTP 550, 553, etc.)
+      const isNotFound = 
+        error.message.includes("550") || 
+        fallbackError.message.includes("550") ||
+        error.message.toLowerCase().includes("address not found") ||
+        fallbackError.message.toLowerCase().includes("address not found") ||
+        error.message.toLowerCase().includes("no such user");
+
+      if (isNotFound) {
+        throw new Error("Alamat email tidak ditemukan atau tidak valid. Silakan periksa kembali.");
+      }
+
+      throw new Error("Gagal mengirim email verifikasi. Silakan coba beberapa saat lagi.");
     }
   }
 };

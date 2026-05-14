@@ -4,8 +4,10 @@ const { OAuth2Client } = require("google-auth-library");
 const { userRegisterSchema } = require("../validations/auth.validation");
 const mailService = require("../services/mail.service");
 const crypto = require("crypto");
+const dns = require("dns").promises;
 
 const prisma = require("../config/prisma");
+const cache = require("../utils/memoryCache");
 const { success, error: sendError } = require("../utils/response.helper");
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -116,31 +118,44 @@ exports.requestOTP = async (req, res) => {
     });
   }
 
+  // Quick domain validation to prevent obvious async bounces
+  const domain = email.split("@")[1];
+  try {
+    const mx = await dns.resolveMx(domain);
+    if (!mx || mx.length === 0) {
+      throw new Error();
+    }
+  } catch (e) {
+    return res.status(400).json({
+      success: false,
+      message: "Domain email tidak valid atau tidak dapat menerima email.",
+    });
+  }
+
   const otp = crypto.randomInt(100000, 999999).toString();
 
   const expires = new Date(Date.now() + 5 * 60 * 1000);
 
   try {
-    await prisma.user.upsert({
-      where: {
-        email,
-      },
-      update: {
-        otp,
-        otpExpires: expires,
-      },
-      create: {
-        email,
-        nama: email.split("@")[0],
-        role: "user",
-        tipe_akun: "free",
-        sisa_credit: 3,
-        otp,
-        otpExpires: expires,
-      },
-    });
-
+    // 1. Send OTP first. If fails, no record created anywhere.
     await mailService.sendOTP(email, otp);
+
+    // 2. If email success, then store OTP in database ONLY if user exists
+    // (requestOTP is typically for existing users or forgot password flow)
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      await prisma.user.update({
+        where: { email },
+        data: {
+          otp,
+          otpExpires: expires,
+        },
+      });
+    } else {
+      // If it's a new user requesting OTP (not through register), 
+      // we store in cache for consistency with the new registration flow.
+      cache.set(`pending_otp_${email}`, { otp, expires }, 5 * 60);
+    }
 
     return success(res, { message: "OTP sedang dikirim!" });
   } catch (error) {
@@ -152,34 +167,64 @@ exports.verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
 
-    const user = await prisma.user.findUnique({
-      where: {
-        email,
-      },
-    });
+    // 1. Check for Pending Registration in Cache
+    const pendingReg = cache.get(`pending_reg_${email}`);
+    
+    if (pendingReg) {
+      if (String(pendingReg.otp) !== String(otp)) {
+        return res.status(400).json({ success: false, message: "OTP salah" });
+      }
+
+      if (new Date() > new Date(pendingReg.otpExpires)) {
+        cache.delete(`pending_reg_${email}`);
+        return res.status(400).json({ success: false, message: "OTP kadaluarsa" });
+      }
+
+      // OTP Correct! Now move from Cache to DB
+      const user = await prisma.user.upsert({
+        where: { email: pendingReg.email },
+        update: {
+          nama: pendingReg.nama,
+          password: pendingReg.password,
+          otp: null,
+          otpExpires: null
+        },
+        create: {
+          nama: pendingReg.nama,
+          email: pendingReg.email,
+          password: pendingReg.password,
+          role: "user",
+          tipe_akun: "free",
+          sisa_credit: 3,
+          agreed_to_terms: true,
+          agreed_at: new Date(),
+        },
+      });
+
+      // Cleanup cache
+      cache.delete(`pending_reg_${email}`);
+
+      const authToken = generateToken(user);
+      return success(res, { 
+        message: "Registrasi & Verifikasi Berhasil", 
+        data: { token: authToken, user } 
+      });
+    }
+
+    // 2. Fallback to Database (for Forgot Password or existing Unverified users)
+    const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user || String(user.otp) !== String(otp)) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP salah",
-      });
+      return res.status(400).json({ success: false, message: "OTP salah" });
     }
 
     if (new Date() > user.otpExpires) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP kadaluarsa",
-      });
+      return res.status(400).json({ success: false, message: "OTP kadaluarsa" });
     }
 
     await prisma.user.update({
-      where: {
-        email,
-      },
-      data: {
-        otp: null,
-        otpExpires: null,
-      },
+      where: { email },
+      data: { otp: null, otpExpires: null },
     });
 
     const authToken = generateToken(user);
@@ -374,9 +419,29 @@ exports.userRegister = async (req, res) => {
     });
 
     if (existingUser) {
+      // If user exists but is NOT verified (still has OTP), allow them to "re-register"
+      // by deleting the old unverified account so the new one can be created.
+      if (existingUser.otp !== null) {
+        await prisma.user.delete({ where: { email } });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Email sudah terdaftar dan terverifikasi. Silakan login.",
+        });
+      }
+    }
+
+    // Quick domain validation to prevent obvious async bounces
+    const domain = email.split("@")[1];
+    try {
+      const mx = await dns.resolveMx(domain);
+      if (!mx || mx.length === 0) {
+        throw new Error();
+      }
+    } catch (e) {
       return res.status(400).json({
         success: false,
-        message: "Email terdaftar",
+        message: "Domain email tidak valid atau tidak dapat menerima email. Periksa kembali penulisan domain Anda.",
       });
     }
 
@@ -384,26 +449,22 @@ exports.userRegister = async (req, res) => {
     const otp = crypto.randomInt(100000, 999999).toString();
     const otpExpires = new Date(Date.now() + 5 * 60 * 1000);
 
-    const newUser = await prisma.user.create({
-      data: {
-        nama,
-        email,
-        password: hashedPassword,
-        role: "user",
-        tipe_akun: "free",
-        sisa_credit: 3,
-        otp,
-        otpExpires,
-        agreed_to_terms: true,
-        agreed_at: new Date(),
-      },
-    });
-
+    // 1. Send OTP FIRST
     await mailService.sendOTP(email, otp);
+
+    // 2. STORE IN CACHE, NOT DATABASE
+    // This keeps the User table clean until verified.
+    cache.set(`pending_reg_${email}`, {
+      nama,
+      email,
+      password: hashedPassword,
+      otp,
+      otpExpires,
+    }, 5 * 60); // 5 minutes expiry
 
     return success(res, { 
       statusCode: 201, 
-      message: "Registrasi berhasil, OTP telah dikirim" 
+      message: "OTP telah dikirim ke email Anda. Silakan verifikasi untuk menyelesaikan pendaftaran." 
     });
   } catch (error) {
     return sendError(res, { message: error.message });
