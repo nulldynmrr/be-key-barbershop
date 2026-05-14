@@ -16,13 +16,20 @@ function assertValidAnalyzeUpload(state) {
     throw err;
   }
 
-  if (!file?.buffer || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
+  if (!file?.buffer && !file?.path) {
     const err = new Error("File gambar tidak valid atau kosong.");
     err.statusCode = 400;
     throw err;
   }
 
-  if (file.buffer.length > MAX_IMAGE_BYTES) {
+  if (file.buffer && !Buffer.isBuffer(file.buffer)) {
+    const err = new Error("Data file tidak valid.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const size = file.size || (file.buffer ? file.buffer.length : 0);
+  if (size > MAX_IMAGE_BYTES) {
     const err = new Error("Ukuran gambar melebihi batas yang diizinkan.");
     err.statusCode = 413;
     throw err;

@@ -9,12 +9,13 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024;
  */
 const compressImageIfNeeded = async (file) => {
   if (file.size > MAX_FILE_SIZE) {
-    let quality = 80;
-    let compressedBuffer = await sharp(file.buffer).webp({ quality }).toBuffer();
+    const source = file.buffer || file.path;
+    let quality = 70;
+    let compressedBuffer = await sharp(source).webp({ quality }).toBuffer();
 
     while (compressedBuffer.length > MAX_FILE_SIZE && quality > 20) {
       quality -= 10;
-      compressedBuffer = await sharp(file.buffer).webp({ quality }).toBuffer();
+      compressedBuffer = await sharp(source).webp({ quality }).toBuffer();
     }
 
     file.buffer = compressedBuffer;

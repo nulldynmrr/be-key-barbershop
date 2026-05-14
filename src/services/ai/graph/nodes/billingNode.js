@@ -15,6 +15,11 @@ const billingNode = async (state) => {
 
   assertValidAnalyzeUpload(state);
 
+  // Ensure buffer exists for downstream nodes (LLM/Sharp)
+  if (!file.buffer && file.path) {
+    file.buffer = fs.readFileSync(file.path);
+  }
+
   await checkRateLimit(userId);
 
   await compressImageIfNeeded(file);
