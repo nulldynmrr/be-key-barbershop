@@ -73,6 +73,10 @@ model Transaction {
 model AIGeneration {
   id                    String         @id @default(uuid())
   user_id               String
+  /// SHA-256 hex buffer foto (setelah kompresi di billingNode) untuk dedupe lintas restart
+  image_hash            String?        @db.VarChar(64)
+  /// SHA-256 hex dari daftar fitur aktif (sorted) agar cache tidak tertukar antar kombinasi fitur
+  feature_fingerprint   String?        @db.VarChar(64)
   url_foto_upload       String
   url_hasil_img         Json?
   hasil_analisis        Json
@@ -80,6 +84,8 @@ model AIGeneration {
   tgl_generate          DateTime       @default(now())
   user                  User           @relation(fields: [user_id], references: [id])
   system_api_logs       SystemApiLog[]
+
+  @@index([user_id, image_hash, feature_fingerprint])
 }
 
 model SystemApiLog {
