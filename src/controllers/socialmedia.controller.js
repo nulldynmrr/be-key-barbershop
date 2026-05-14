@@ -1,13 +1,14 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getSocialMedias = async (req, res) => {
   try {
     const socialMedias = await prisma.socialMedia.findMany({
       orderBy: { createdAt: 'desc' }
     });
-    res.status(200).json({ success: true, data: socialMedias });
+    return success(res, { data: socialMedias });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -16,11 +17,11 @@ exports.createSocialMedia = async (req, res) => {
     const { title, link } = req.body;
 
     if (!title || !link) {
-      return res.status(400).json({ success: false, message: "Title dan link harus diisi" });
+      return sendError(res, { message: "Title dan link harus diisi", statusCode: 400 });
     }
 
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "Thumbnail wajib diunggah" });
+      return sendError(res, { message: "Thumbnail wajib diunggah", statusCode: 400 });
     }
 
     const thumbnail = `/uploads/social-media/${req.file.filename}`;
@@ -37,9 +38,9 @@ exports.createSocialMedia = async (req, res) => {
 
 
 
-    res.status(201).json({ success: true, data: newSocialMedia });
+    return success(res, { statusCode: 201, data: newSocialMedia });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -52,15 +53,15 @@ exports.deleteSocialMedia = async (req, res) => {
     });
 
     if (!existingSocialMedia) {
-      return res.status(404).json({ success: false, message: "Media Sosial tidak ditemukan" });
+      return sendError(res, { message: "Media Sosial tidak ditemukan", statusCode: 404 });
     }
 
     await prisma.socialMedia.delete({
       where: { id: parseInt(id) },
     });
 
-    res.status(200).json({ success: true, message: "Media Sosial berhasil dihapus" });
+    return success(res, { message: "Media Sosial berhasil dihapus" });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

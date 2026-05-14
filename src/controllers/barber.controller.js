@@ -1,11 +1,12 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getAllBarbers = async (req, res) => {
   try {
     const barbers = await prisma.barber.findMany();
-    res.status(200).json({ success: true, data: barbers });
+    return success(res, { data: barbers });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -26,9 +27,9 @@ exports.createBarber = async (req, res) => {
       },
     });
 
-    res.status(201).json({ success: true, data: newBarber });
+    return success(res, { statusCode: 201, data: newBarber });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -42,7 +43,7 @@ exports.updateBarber = async (req, res) => {
     });
 
     if (!existingBarber) {
-      return res.status(404).json({ success: false, message: "Barber tidak ditemukan" });
+      return sendError(res, { message: "Barber tidak ditemukan", statusCode: 404 });
     }
 
     const dataToUpdate = {};
@@ -59,9 +60,9 @@ exports.updateBarber = async (req, res) => {
       data: dataToUpdate,
     });
 
-    res.status(200).json({ success: true, data: updatedBarber });
+    return success(res, { data: updatedBarber });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -74,15 +75,15 @@ exports.deleteBarber = async (req, res) => {
     });
 
     if (!existingBarber) {
-      return res.status(404).json({ success: false, message: "Barber tidak ditemukan" });
+      return sendError(res, { message: "Barber tidak ditemukan", statusCode: 404 });
     }
 
     await prisma.barber.delete({
       where: { id: parseInt(id) },
     });
 
-    res.status(200).json({ success: true, message: "Barber berhasil dihapus" });
+    return success(res, { message: "Barber berhasil dihapus" });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

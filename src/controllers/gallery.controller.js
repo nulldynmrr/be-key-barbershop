@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 const fs = require('fs');
 const path = require('path');
 
@@ -12,9 +13,9 @@ exports.getAllGallery = async (req, res) => {
       orderBy: { id: 'desc' }
     });
 
-    res.status(200).json({ success: true, data: galleries });
+    return success(res, { data: galleries });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Terjadi kesalahan server: " + error.message });
+    return sendError(res, { message: "Terjadi kesalahan server: " + error.message });
   }
 };
 
@@ -23,10 +24,10 @@ exports.createGallery = async (req, res) => {
     const { kategori } = req.body;
 
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "Gambar wajib diunggah" });
+      return sendError(res, { message: "Gambar wajib diunggah", statusCode: 400 });
     }
     if (!kategori) {
-      return res.status(400).json({ success: false, message: "Kategori wajib diisi" });
+      return sendError(res, { message: "Kategori wajib diisi", statusCode: 400 });
     }
 
     const url_foto_gallery = `/uploads/gallery/${req.file.filename}`;
@@ -38,9 +39,9 @@ exports.createGallery = async (req, res) => {
       },
     });
 
-    res.status(201).json({ success: true, data: newGallery });
+    return success(res, { statusCode: 201, data: newGallery });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Gagal menyimpan data: " + error.message });
+    return sendError(res, { message: "Gagal menyimpan data: " + error.message });
   }
 };
 
@@ -53,7 +54,7 @@ exports.deleteGallery = async (req, res) => {
     });
 
     if (!existingGallery) {
-      return res.status(404).json({ success: false, message: "Gallery tidak ditemukan" });
+      return sendError(res, { message: "Gallery tidak ditemukan", statusCode: 404 });
     }
 
     if (existingGallery.url_foto_gallery) {
@@ -67,8 +68,8 @@ exports.deleteGallery = async (req, res) => {
       where: { id: parseInt(id) },
     });
 
-    res.status(200).json({ success: true, message: "Gallery berhasil dihapus beserta filenya" });
+    return success(res, { message: "Gallery berhasil dihapus beserta filenya" });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Gagal menghapus data: " + error.message });
+    return sendError(res, { message: "Gagal menghapus data: " + error.message });
   }
 };

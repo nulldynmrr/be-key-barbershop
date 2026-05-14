@@ -122,7 +122,7 @@ const resolveUserEmail = async (req, res, next) => {
     });
 
     return success(res, {
-      email: user?.email || "Guest",
+      data: { email: user?.email || "Guest" },
     });
   } catch (error) {
     return sendError(res, { message: error.message });

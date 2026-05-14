@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getAdminAlerts = async (req, res) => {
   try {
@@ -30,18 +31,13 @@ exports.getAdminAlerts = async (req, res) => {
       }
     }
 
-    res.status(200).json({
-      success: true,
-      total_alerts: alerts.length,
+    return success(res, {
       data: alerts,
+      meta: { total_alerts: alerts.length }
     });
   } catch (error) {
     console.error("Notification Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Gagal memuat notifikasi",
-      error: error.message,
-    });
+    return sendError(res, { message: "Gagal memuat notifikasi" });
   }
 };
 
@@ -59,17 +55,12 @@ exports.getAllNotifications = async (req, res) => {
       })
     ]);
 
-    res.status(200).json({
-      success: true,
-      unreadCount,
+    return success(res, {
       data: notifications,
+      meta: { unreadCount }
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Gagal mengambil notifikasi",
-      error: error.message,
-    });
+    return sendError(res, { message: "Gagal mengambil notifikasi" });
   }
 };
 
@@ -81,13 +72,12 @@ exports.markAsRead = async (req, res) => {
       data: { is_read: true },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Notifikasi dibaca",
       data: notification,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -98,11 +88,10 @@ exports.markAllAsRead = async (req, res) => {
       data: { is_read: true },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Semua notifikasi telah ditandai dibaca",
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

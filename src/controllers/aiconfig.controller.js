@@ -4,6 +4,7 @@ const { decrypt, encrypt } = require("../utils/encryption");
 const cache = require("../utils/memoryCache");
 
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getExchangeSetting = async (req, res, next) => {
   try {
@@ -20,7 +21,7 @@ exports.getExchangeSetting = async (req, res, next) => {
         },
       });
     }
-    res.status(200).json({ success: true, data: config });
+    return success(res, { data: config });
   } catch (error) {
     next(error);
   }
@@ -34,8 +35,7 @@ exports.updateExchangeSetting = async (req, res, next) => {
       update: { globalMultiplier, baseRateUsdIdr, inflationBuffer },
       create: { id: 1, globalMultiplier, baseRateUsdIdr, inflationBuffer },
     });
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Master Exchange berhasil disimpan",
       data: config,
     });
@@ -67,7 +67,7 @@ exports.getAiModels = async (req, res, next) => {
       };
     });
 
-    res.status(200).json({ success: true, data: maskedModels });
+    return success(res, { data: maskedModels });
   } catch (error) {
     next(error);
   }
@@ -88,7 +88,7 @@ exports.getActiveModelsByType = async (req, res, next) => {
         orderBy: { namaRouter: "asc" },
       }),
     ]);
-    res.status(200).json({ success: true, data: { llm: llmModels, image_gen: imageModels } });
+    return success(res, { data: { llm: llmModels, image_gen: imageModels } });
   } catch (error) {
     next(error);
   }
@@ -125,12 +125,12 @@ exports.saveAiModel = async (req, res, next) => {
       modelConfig = await prisma.aiModel.update({ where: { id }, data: modelData });
     } else {
       if (!apiKey)
-        return res.status(400).json({ success: false, message: "API Key wajib diisi untuk model baru!" });
+        return sendError(res, { message: "API Key wajib diisi untuk model baru!" });
       modelData.apiKey = encrypt(apiKey);
       modelConfig = await prisma.aiModel.create({ data: modelData });
     }
 
-    res.status(200).json({ success: true, message: "Konfigurasi Model AI berhasil disimpan", data: modelConfig });
+    return success(res, { message: "Konfigurasi Model AI berhasil disimpan", data: modelConfig });
   } catch (error) {
     next(error);
   }
@@ -160,8 +160,7 @@ exports.toggleModelStatus = async (req, res, next) => {
     if (!isActive) {
       // Logic manual nonaktifkan paket dihapus agar status bersifat cerdas/dinamis
     }
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: `Router berhasil di-${isActive ? "aktifkan" : "matikan"}`,
     });
   } catch (error) {
@@ -252,8 +251,7 @@ exports.getAiUsageLogs = async (req, res, next) => {
       };
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: formattedLogs,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
@@ -265,7 +263,7 @@ exports.getAiUsageLogs = async (req, res, next) => {
 exports.getFeaturePricing = async (req, res) => {
   try {
     const pricing = await prisma.featurePricing.findMany({ orderBy: { featureCode: "asc" } });
-    res.status(200).json({ success: true, data: pricing });
+    return success(res, { data: pricing });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -283,7 +281,7 @@ exports.getFeatureToggleMap = async (req, res, next) => {
         koinCost: fp.koinCost,
       };
     }
-    res.status(200).json({ success: true, data: result });
+    return success(res, { data: result });
   } catch (error) {
     next(error);
   }
@@ -301,13 +299,12 @@ exports.updateFeaturePrice = async (req, res) => {
 
     cache.delete("pricingList");
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Harga fitur berhasil diperbarui",
       data: updatedPricing,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -404,8 +401,7 @@ exports.calculateIdealKoin = async (req, res, next) => {
     const koinApiIdr = Math.ceil(modalApiIdr * multiplier / refHargaPerKoin);
     const totalKoinIdeal = totalKoinFitur + koinApiIdr;
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: {
         model_aktif: activeModel.namaRouter,
         pricing_unit: activeModel.pricingUnit,

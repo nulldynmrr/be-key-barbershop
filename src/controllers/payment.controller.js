@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.createPayment = async (req, res) => {
   // Placeholder: integrasi Payment Gateway (Midtrans/Duitku)
@@ -14,13 +15,12 @@ exports.topupManual = async (req, res) => {
       data: { sisa_credit: { increment: parseInt(jumlah_credit) } },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: `Berhasil menambah ${jumlah_credit} credit.`,
-      sisa_credit_sekarang: updatedUser.sisa_credit,
+      data: { sisa_credit_sekarang: updatedUser.sisa_credit },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -33,7 +33,7 @@ exports.buyPackage = async (req, res) => {
     const pkg = await prisma.subscriptionPackage.findUnique({ where: { id: package_id } });
 
     if (!pkg) {
-      return res.status(404).json({ success: false, message: "Paket tidak ditemukan." });
+      return sendError(res, { message: "Paket tidak ditemukan.", statusCode: 404 });
     }
 
     const updatedUser = await prisma.user.update({
@@ -54,13 +54,14 @@ exports.buyPackage = async (req, res) => {
       },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: `Berhasil membeli paket ${pkg.namaPaket}.`,
-      sisa_credit_sekarang: updatedUser.sisa_credit,
-      active_package: pkg.namaPaket,
+      data: {
+        sisa_credit_sekarang: updatedUser.sisa_credit,
+        active_package: pkg.namaPaket,
+      },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

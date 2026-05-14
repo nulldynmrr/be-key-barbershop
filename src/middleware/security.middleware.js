@@ -18,10 +18,11 @@ exports.requestId = (req, res, next) => {
  */
 exports.globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per window
+  max: 1000, // Limit each IP to 1000 requests per window (more generous for dev/SPA)
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
+    console.warn(`[Security] Rate Limit Hit (Global): ${req.ip} -> ${req.method} ${req.path}`);
     return error(res, {
       statusCode: 429,
       errorCode: "TOO_MANY_REQUESTS",
@@ -35,8 +36,9 @@ exports.globalLimiter = rateLimit({
  */
 exports.aiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 AI requests per minute
+  max: 30, // Limit each IP to 30 AI requests per minute
   handler: (req, res) => {
+    console.warn(`[Security] Rate Limit Hit (AI): ${req.ip} -> ${req.method} ${req.path}`);
     return error(res, {
       statusCode: 429,
       errorCode: "AI_RATE_LIMIT",

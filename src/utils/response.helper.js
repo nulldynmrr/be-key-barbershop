@@ -4,12 +4,17 @@
  */
 
 exports.success = (res, { data, message, statusCode = 200, meta = {} }) => {
-  return res.status(statusCode).json({
+  const response = {
     success: true,
     message: message || "Operation successful",
     data,
-    ...meta,
-  });
+  };
+
+  if (meta && Object.keys(meta).length > 0) {
+    response.meta = meta;
+  }
+
+  return res.status(statusCode).json(response);
 };
 
 exports.error = (res, { message, errorCode, errors, statusCode = 500 }) => {
