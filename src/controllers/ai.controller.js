@@ -1,15 +1,13 @@
 const { faceAnalysisSchema } = require("../validations/ai.validation");
 const aiService = require("../services/ai");
-const cache = require("../utils/memoryCache");
-
 const prisma = require("../config/prisma");
-
 const { FEATURE_GATE_MAP } = require("../services/ai/featureGateMap");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.analyzeFace = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "Harap unggah foto wajah." });
+      return sendError(res, { statusCode: 400, message: "Harap unggah foto wajah." });
     }
 
     let parsedFeatures = req.body.requestedFeatures;
@@ -23,8 +21,8 @@ exports.analyzeFace = async (req, res) => {
 
     const validation = faceAnalysisSchema.safeParse({ requestedFeatures: parsedFeatures });
     if (!validation.success) {
-      return res.status(400).json({
-        success: false,
+      return sendError(res, {
+        statusCode: 400,
         errors: validation.error.errors.map((e) => e.message),
       });
     }
@@ -35,11 +33,10 @@ exports.analyzeFace = async (req, res) => {
       validation.data.requestedFeatures
     );
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: result.kualitas_ok
-        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}${result.imageGenKoin ? `, Image Gen: ${result.imageGenKoin}` : ''}).`
-        : `Kualitas foto kurang baik: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong.`,
+        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong.`
+        : `Kualitas foto kurang baik: ${result.alasan}.`,
       data: {
         record: result.resultTx || {
           url_foto_upload: result.url_foto_upload,
@@ -48,21 +45,22 @@ exports.analyzeFace = async (req, res) => {
         hasil_analisis: result.hasil_analisis,
         active_features: result.activeFeatures,
       },
-      usage_info: {
-        tokens: result.total_tokens,
-        cost_usd: result.realCostUsd,
-        service_fee: result.totalKoinFitur,
-        token_fee: result.realKoinAi,
-        image_gen_fee: result.imageGenKoin || 0,
-        credit_before: result.sisa_credit_before,
-        credit_after: result.sisa_credit_after,
-      },
+      meta: {
+        usage_info: {
+          tokens: result.total_tokens,
+          cost_usd: result.realCostUsd,
+          service_fee: result.totalKoinFitur,
+          token_fee: result.realKoinAi,
+          image_gen_fee: result.imageGenKoin || 0,
+          credit_before: result.sisa_credit_before,
+          credit_after: result.sisa_credit_after,
+        }
+      }
     });
   } catch (error) {
-    console.error("AI Controller Error:", error.message);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      errorCode: error.errorCode || "GENERIC_ERROR",
+    return sendError(res, {
+      statusCode: error.statusCode || 500,
+      errorCode: error.errorCode || "AI_PROCESSING_ERROR",
       message: error.message || "Gagal memproses AI.",
     });
   }
@@ -96,8 +94,11 @@ exports.getAvailableFeatures = async (req, res) => {
       };
     }
 
-    res.status(200).json({ success: true, data: features });
+    return success(res, { data: features });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, {
+      statusCode: 500,
+      message: "Gagal memuat daftar fitur.",
+    });
   }
 };

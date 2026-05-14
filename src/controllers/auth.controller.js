@@ -6,6 +6,7 @@ const mailService = require("../services/mail.service");
 const crypto = require("crypto");
 
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const generateToken = (user) => {
@@ -93,15 +94,14 @@ exports.googleLogin = async (req, res) => {
     }
 
     const authToken = generateToken(user);
-
-    res
-      .status(200)
-      .json(buildAuthResponse("Login Google berhasil", authToken, user));
+    return success(res, { 
+      message: "Login Google berhasil", 
+      data: { token: authToken, user } 
+    });
   } catch (error) {
-    res.status(500).json({
-      success: false,
+    return sendError(res, {
       message: "Login Google gagal",
-      error: error.message,
+      errors: [error.message]
     });
   }
 };
@@ -142,16 +142,9 @@ exports.requestOTP = async (req, res) => {
 
     await mailService.sendOTP(email, otp);
 
-    res.status(200).json({
-      success: true,
-      message: "OTP sedang dikirim!",
-    });
+    return success(res, { message: "OTP sedang dikirim!" });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Gagal memproses OTP",
-      error: error.message,
-    });
+    return sendError(res, { message: "Gagal memproses OTP", errors: [error.message] });
   }
 };
 
@@ -191,14 +184,12 @@ exports.verifyOTP = async (req, res) => {
 
     const authToken = generateToken(user);
 
-    res
-      .status(200)
-      .json(buildAuthResponse("Verifikasi Berhasil", authToken, user));
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
+    return success(res, { 
+      message: "Verifikasi Berhasil", 
+      data: { token: authToken, user } 
     });
+  } catch (error) {
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -231,15 +222,12 @@ exports.guestLogin = async (req, res) => {
     }
 
     const authToken = generateToken(user);
-
-    res
-      .status(200)
-      .json(buildAuthResponse("Login guest berhasil", authToken, user));
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
+    return success(res, { 
+      message: "Login guest berhasil", 
+      data: { token: authToken, user } 
     });
+  } catch (error) {
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -280,12 +268,12 @@ exports.adminLogin = async (req, res) => {
       },
     );
 
-    res.status(200).json(buildAuthResponse("Welcome Admin", authToken, user));
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
+    return success(res, { 
+      message: "Welcome Admin", 
+      data: { token: authToken, user } 
     });
+  } catch (error) {
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -331,13 +319,12 @@ exports.userLogin = async (req, res) => {
     }
 
     const authToken = generateToken(user);
-
-    res.status(200).json(buildAuthResponse("Login berhasil", authToken, user));
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
+    return success(res, { 
+      message: "Login berhasil", 
+      data: { token: authToken, user } 
     });
+  } catch (error) {
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -357,16 +344,13 @@ exports.register = async (req, res) => {
       },
     });
 
-    res.status(201).json({
-      success: true,
-      message: "Admin dibuat",
-      user,
+    return success(res, { 
+      statusCode: 201, 
+      message: "Admin dibuat", 
+      data: { user } 
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -417,15 +401,12 @@ exports.userRegister = async (req, res) => {
 
     await mailService.sendOTP(email, otp);
 
-    res.status(201).json({
-      success: true,
-      message: "Registrasi berhasil, OTP telah dikirim",
+    return success(res, { 
+      statusCode: 201, 
+      message: "Registrasi berhasil, OTP telah dikirim" 
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -455,15 +436,9 @@ exports.forgotPassword = async (req, res) => {
       await mailService.sendOTP(email, otp);
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Instruksi reset password dikirim jika terdaftar.",
-    });
+    return success(res, { message: "Instruksi reset password dikirim jika terdaftar." });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -507,21 +482,16 @@ exports.resetPassword = async (req, res) => {
       },
     });
 
-    res.status(200).json({
-      success: true,
-      message: "Password berhasil diubah. Silakan login dengan password baru.",
-    });
+    return success(res, { message: "Password berhasil diubah. Silakan login dengan password baru." });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, { message: error.message });
   }
 };
 
 exports.logout = async (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Berhasil logout",
-  });
+  try {
+    return success(res, { message: "Berhasil logout" });
+  } catch (error) {
+    return sendError(res, { message: error.message });
+  }
 };

@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const bcrypt = require("bcrypt");
 const mailService = require("../services/mail.service");
+const { success, error: sendError } = require("../utils/response.helper");
 
 const createAuditLog = async (adminId, action, target = null, details = null, req = null) => {
   try {
@@ -23,7 +24,7 @@ const createAuditLog = async (adminId, action, target = null, details = null, re
 const getUsers = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const search = req.query.search || "";
     const skip = (page - 1) * limit;
 
@@ -57,13 +58,12 @@ const getUsers = async (req, res, next) => {
       }),
     ]);
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: users,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -84,9 +84,12 @@ const getUserDetail = async (req, res, next) => {
     }
 
     const { password, device_cookie, ...safeUser } = user;
-    res.status(200).json({ success: true, data: safeUser });
+    return success(res, { data: safeUser });
   } catch (error) {
-    next(error);
+    return sendError(res, {
+      statusCode: error.statusCode || 500,
+      message: error.message
+    });
   }
 };
 
@@ -114,18 +117,15 @@ const adjustCredit = async (req, res, next) => {
     await createAuditLog(req.user.id, "ADJUST_CREDIT", user.id, { delta, new_credit: user.sisa_credit }, req);
 
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Credit berhasil diupdate",
       data: { id: user.id, sisa_credit: user.sisa_credit },
     });
   } catch (error) {
     if (error.code === "P2025") {
-      const notFound = new Error("User tidak ditemukan");
-      notFound.statusCode = 404;
-      return next(notFound);
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -153,18 +153,15 @@ const updateUserStatus = async (req, res, next) => {
     await createAuditLog(req.user.id, "UPDATE_USER_STATUS", user.id, { is_banned }, req);
 
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: is_banned ? "User berhasil dibanned" : "User berhasil di-unban",
       data: { id: user.id, is_banned: user.is_banned },
     });
   } catch (error) {
     if (error.code === "P2025") {
-      const notFound = new Error("User tidak ditemukan");
-      notFound.statusCode = 404;
-      return next(notFound);
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -181,14 +178,12 @@ const deleteUser = async (req, res, next) => {
     await createAuditLog(req.user.id, "DELETE_USER", req.params.id, null, req);
 
 
-    res.status(200).json({ success: true, message: "User berhasil dihapus" });
+    return success(res, { message: "User berhasil dihapus" });
   } catch (error) {
     if (error.code === "P2025") {
-      const notFound = new Error("User tidak ditemukan");
-      notFound.statusCode = 404;
-      return next(notFound);
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -219,14 +214,10 @@ const requestAdminOTP = async (req, res, next) => {
 
     if (req.log) req.log.info({ adminId: admin.id }, "Admin merequest OTP untuk perubahan profil/password");
 
-    res.status(200).json({
-      success: true,
-      message: "Kode OTP telah dikirim ke email Anda",
-    });
+    return success(res, { message: "Kode OTP telah dikirim ke email Anda" });
   } catch (error) {
-    console.error("OTP Request Error:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
+    return sendError(res, {
+      statusCode: error.statusCode || 500,
       message: error.message || "Terjadi kesalahan sistem saat mengirim OTP",
     });
   }
@@ -289,13 +280,15 @@ const updateAdminProfile = async (req, res, next) => {
     await createAuditLog(req.user.id, "UPDATE_ADMIN_PROFILE", req.user.id, { updatedFields: Object.keys(updateData) }, req);
 
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Profil admin berhasil diperbarui",
       data: updatedAdmin,
     });
   } catch (error) {
-    next(error);
+    return sendError(res, {
+      statusCode: error.statusCode || 500,
+      message: error.message
+    });
   }
 };
 
@@ -312,19 +305,16 @@ const getAdminProfile = async (req, res, next) => {
       },
     });
 
-    res.status(200).json({
-      success: true,
-      data: admin,
-    });
+    return success(res, { data: admin });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
 const getAuditLogs = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const skip = (page - 1) * limit;
 
     const [total, logs] = await Promise.all([
@@ -341,13 +331,12 @@ const getAuditLogs = async (req, res, next) => {
       }),
     ]);
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: logs,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 

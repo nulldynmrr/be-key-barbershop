@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 const getProfile = async (req, res, next) => {
   try {
@@ -26,15 +27,12 @@ const getProfile = async (req, res, next) => {
     console.log("Profile fetched:", user ? "Found" : "Not Found");
 
     if (!user) {
-      const error = new Error("User tidak ditemukan");
-      error.statusCode = 404;
-      throw error;
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
 
-    res.status(200).json({ success: true, data: user });
+    return success(res, { data: user });
   } catch (error) {
-    console.error("Error in getProfile:", error);
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -56,20 +54,19 @@ const updateProfile = async (req, res, next) => {
 
     if (req.log) req.log.info({ userId: req.user.id }, "User update profil");
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Profil berhasil diupdate",
       data: user,
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
 const getAiHistory = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
     const [total, history] = await Promise.all([
@@ -82,20 +79,19 @@ const getAiHistory = async (req, res, next) => {
       }),
     ]);
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: history,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
 const getTransactions = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
     const [total, transactions] = await Promise.all([
@@ -108,13 +104,12 @@ const getTransactions = async (req, res, next) => {
       }),
     ]);
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: transactions,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -126,12 +121,11 @@ const resolveUserEmail = async (req, res, next) => {
       select: { email: true },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       email: user?.email || "Guest",
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
