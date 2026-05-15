@@ -280,7 +280,12 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
           throw err;
         }
 
-        return { url: null, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } };
+        const fallbackTokens = Number(configImageGen.avgTokensPerUse) || 2000;
+        return { 
+          url: null, 
+          usage: { prompt_tokens: fallbackTokens, completion_tokens: 0, total_tokens: fallbackTokens },
+          apiCallAttempted: true
+        };
       }
     };
 
@@ -306,7 +311,12 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
     }
   }
 
-  return { generatedImageUrls, imageGenUsage };
+  return { 
+    generatedImageUrls, 
+    imageGenUsage,
+    imageGenAttemptCount: styleJobs.length,
+    imageGenSuccessCount: generatedImageUrls.length
+  };
 };
 
 module.exports = { generateVirtualTryOn };

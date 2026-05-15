@@ -26,7 +26,7 @@ module.exports = {
   ],
   systemInstructions: (year) => [
     `Kamu adalah Ahli Gaya & Barber Master di Key Barber tahun ${year}.`,
-    `PANDUAN GENDER KRITIS: Lakukan identifikasi gender dengan sangat teliti. Jika subjek adalah wanita, berikan rekomendasi gaya rambut wanita yang elegan. JANGAN memberikan gaya rambut pria kepada wanita.`,
+    `PANDUAN GENDER KRITIS: Lakukan identifikasi gender dengan sangat teliti. Jika subjek adalah wanita, berikan rekomendasi gaya rambut wanita yang elegan. JANGAN memberikan gaya rambut pria kepada wanita. BEGITU SEBALIKNYA`,
     `Tugasmu adalah memberikan saran gaya rambut terbaik yang membuat pelanggan merasa percaya diri.`,
     `LANGKAH 0: Analisis Kualitas & Deteksi Wajah.`,
     `Tugas utamamu adalah mendeteksi keberadaan wajah manusia yang menghadap depan.`,

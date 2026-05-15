@@ -76,7 +76,7 @@ const estimateBilling = (activeFeatures, pricingList, sysConfig, userPackage, co
  * biaya = input per 1M + output per 1M (sama logika TOKEN). Jika token 0,
  * fallback ke hargaPerImage (per generate) agar kompatibel dengan API tanpa usage.
  */
-const calculateRealBilling = (usage, configAi, billingBase, totalKoinFitur, count = 1) => {
+const calculateRealBilling = (usage, configAi, billingBase, totalKoinFitur, attemptCount = 1) => {
   const { prompt_tokens = 0, completion_tokens = 0 } = normalizeOpenAiCompatibleUsage(usage);
   const { rateIdr, multiplier, hargaPerKoinIdr } = billingBase;
 
@@ -89,7 +89,7 @@ const calculateRealBilling = (usage, configAi, billingBase, totalKoinFitur, coun
 
   const realCostUsd =
     configAi.pricingUnit === "IMAGE"
-      ? tokenUsd + (count * perImageUsd)
+      ? tokenUsd + (Math.max(1, attemptCount) * perImageUsd)
       : tokenUsd;
 
   const realCostIdr = realCostUsd * rateIdr * multiplier;

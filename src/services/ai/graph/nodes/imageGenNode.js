@@ -59,8 +59,9 @@ const imageGenNode = async (state) => {
       };
     }
 
-    const successCount = generatedImageUrls.filter(Boolean).length;
-    const real = calculateRealBilling(usageNorm, configImageGen, billingBase, 0, successCount);
+    const attemptCount = tryOnResult.imageGenAttemptCount || 1;
+    const successCount = tryOnResult.imageGenSuccessCount || generatedImageUrls.filter(Boolean).length;
+    const real = calculateRealBilling(usageNorm, configImageGen, billingBase, 0, attemptCount);
     
     const imageGenCostUsd = real.realCostUsd;
     const imageGenKoin = real.realKoinAi;
@@ -72,6 +73,8 @@ const imageGenNode = async (state) => {
       imageGenCostUsd,
       imageGenUsage: usageNorm,
       imageGenKoin,
+      imageGenAttemptCount: attemptCount,
+      imageGenSuccessCount: successCount,
       totalDipotong: state.totalDipotong + additionalCost,
     };
   } catch (err) {

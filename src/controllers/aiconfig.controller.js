@@ -81,23 +81,52 @@ exports.getAiModels = async (req, res, next) => {
     });
 
     const maskedModels = models.map((m) => {
-      const usage = apiLogsAgg.find(agg => agg.model_name === m.modelName || agg.model_name === m.namaRouter);
-      const usedBudget = usage && usage._sum.cost_usd ? parseFloat(usage._sum.cost_usd) : 0;
-      const isWarning = m.maxBudget > 0 && usedBudget >= (m.maxBudget * 0.8);
-
       return {
         ...m,
-        usedBudget,
-        isWarning,
         apiKey: "********" + m.apiKey.substring(m.apiKey.length - 4),
       };
     });
 
     // Fetch realtime balance for active models (parallel)
     const modelsWithBalance = await Promise.all(maskedModels.map(async (m) => {
-      if (m.isActive && m.namaRouter.toLowerCase().includes("maia")) {
-        const realtimeBalance = await fetchModelBalance(m);
-        return { ...m, realtimeBalance };
+      if (m.isActive && m.maxBudget > 0) {
+        // Delta usage sejak admin terakhir sync saldo MAIA
+        const deltaUsage = await prisma.systemApiLog.aggregate({
+          _sum: { cost_usd: true },
+          where: {
+            model_name: m.modelName,
+            tgl_penggunaan: m.last_sync_at ? { gte: m.last_sync_at } : undefined,
+          },
+        });
+
+        const deltaUsed = Number(deltaUsage._sum.cost_usd || 0);
+
+        // Anchor: saldo MAIA saat sync. Fallback ke maxBudget bila belum pernah sync.
+        const baseBalance = m.last_maia_balance ?? m.maxBudget;
+        const remainingBudget = Math.max(0, Number(baseBalance) - deltaUsed);
+        const usedTotal = Number(m.maxBudget) - remainingBudget;
+        const usedPercent = (usedTotal / Number(m.maxBudget)) * 100;
+
+        // Fetch API real-time jika MAIA (opsional, tapi informatif di list)
+        let realtimeBalance = null;
+        if (m.namaRouter.toLowerCase().includes("maia")) {
+           realtimeBalance = await fetchModelBalance(m);
+        }
+
+        return {
+          ...m,
+          usedBudget: usedTotal.toFixed(4),
+          remainingBudget: remainingBudget.toFixed(4),
+          usedPercent: usedPercent.toFixed(1),
+          isWarning:  usedPercent >= 80,
+          isCritical: usedPercent >= 95,
+          lastSyncAt: m.last_sync_at,
+          realtimeBalance,
+          budgetSource: m.last_sync_at ? "maia_snapshot+db_delta" : "max_budget_only",
+          budgetNote: m.last_sync_at
+            ? `Saldo MAIA terakhir disync: ${m.last_sync_at.toISOString()}`
+            : "⚠️ Belum pernah sync — pakai maxBudget sebagai baseline",
+        };
       }
       return m;
     }));
@@ -137,7 +166,7 @@ exports.saveAiModel = async (req, res, next) => {
       namaRouter, baseUrl, modelName, apiKey,
       typeAi, pricingUnit,
       hargaInput1M, hargaOutput1M, hargaPerImage,
-      maxBudget, rpmLimit, isActive,
+      maxBudget, rpmLimit, isActive, lastMaiaBalance,
     } = req.body;
 
     // Normalkan unit harga:
@@ -155,6 +184,11 @@ exports.saveAiModel = async (req, res, next) => {
       rpmLimit: parseInt(rpmLimit) || 0,
       isActive,
     };
+
+    if (lastMaiaBalance !== undefined) {
+      modelData.last_maia_balance = lastMaiaBalance;
+      modelData.last_sync_at = new Date();
+    }
 
     let modelConfig;
     if (id) {
@@ -575,7 +609,7 @@ exports.syncModelBalance = async (req, res, next) => {
 
     const updated = await prisma.aiModel.update({
       where: { id },
-      data: { maxBudget: balance }
+      data: { last_maia_balance: balance, last_sync_at: new Date() }
     });
 
     return success(res, { 

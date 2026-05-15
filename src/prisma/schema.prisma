@@ -104,6 +104,9 @@ model SystemApiLog {
   membership_snapshot String?
   charge_usd          Decimal @default(0) @db.Decimal(10, 6)
 
+  attempt_count       Int     @default(1)
+  success_count       Int     @default(1)
+
   user_id          String?
   ai_generation_id String?
 
@@ -158,6 +161,9 @@ model AiModel {
   rpmLimit        Int
   avgTokensPerUse Int     @default(2000)
   isActive        Boolean @default(true)
+
+  last_maia_balance Decimal? @db.Decimal(10, 6)
+  last_sync_at      DateTime?
 
   packagesAsLlm   SubscriptionPackage[] @relation("LlmModel")
   packagesAsImage SubscriptionPackage[] @relation("ImageModel")

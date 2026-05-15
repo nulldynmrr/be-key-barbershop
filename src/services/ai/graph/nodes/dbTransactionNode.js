@@ -85,14 +85,11 @@ const dbTransactionNode = async (state) => {
       },
     });
 
-    const logImageGen =
-      configImageGen &&
-      (igCost > 0 ||
-        igKoin > 0 ||
-        igUsage.prompt_tokens > 0 ||
-        igUsage.completion_tokens > 0 ||
-        igUsage.total_tokens > 0 ||
-        urls.length > 0);
+    const imageGenWasAttempted =
+      configImageGen != null &&
+      state.activeFeatures?.includes("VIRTUAL_TRY_ON");
+
+    const logImageGen = imageGenWasAttempted;
 
     if (logImageGen) {
       await tx.systemApiLog.create({
@@ -109,7 +106,9 @@ const dbTransactionNode = async (state) => {
           user_id: userId,
           ai_generation_id: aiRecord?.id || null,
           membership_snapshot: membershipName,
-          charge_usd: calcChargeUsd(igCost),
+          charge_usd: calcChargeUsd(igCost > 0 ? igCost : Number(configImageGen.hargaPerImage)),
+          attempt_count: state.imageGenAttemptCount || 1,
+          success_count: state.imageGenSuccessCount || 0,
         },
       });
     }
