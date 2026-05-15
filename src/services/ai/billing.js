@@ -76,7 +76,7 @@ const estimateBilling = (activeFeatures, pricingList, sysConfig, userPackage, co
  * biaya = input per 1M + output per 1M (sama logika TOKEN). Jika token 0,
  * fallback ke hargaPerImage (per generate) agar kompatibel dengan API tanpa usage.
  */
-const calculateRealBilling = (usage, configAi, billingBase, totalKoinFitur) => {
+const calculateRealBilling = (usage, configAi, billingBase, totalKoinFitur, count = 1) => {
   const { prompt_tokens = 0, completion_tokens = 0 } = normalizeOpenAiCompatibleUsage(usage);
   const { rateIdr, multiplier, hargaPerKoinIdr } = billingBase;
 
@@ -89,15 +89,28 @@ const calculateRealBilling = (usage, configAi, billingBase, totalKoinFitur) => {
 
   const realCostUsd =
     configAi.pricingUnit === "IMAGE"
-      ? tokenUsd > 0
-        ? tokenUsd
-        : perImageUsd
-      : (prompt_tokens / 1_000_000) * tarifIn + (completion_tokens / 1_000_000) * tarifOut;
+      ? tokenUsd + (count * perImageUsd)
+      : tokenUsd;
 
   const realCostIdr = realCostUsd * rateIdr * multiplier;
-  const realKoinAi = Math.ceil(realCostIdr / hargaPerKoinIdr);
+  let realKoinAi = Math.ceil(realCostIdr / hargaPerKoinIdr);
+  
+  // Hardening: Pastikan minimal ada 1 koin untuk token jika API berhasil dipanggil
+  if (realKoinAi === 0 && (prompt_tokens > 0 || completion_tokens > 0)) {
+    realKoinAi = 1;
+  }
 
-  return { realCostUsd, realKoinAi, totalDipotong: totalKoinFitur + realKoinAi };
+  const finalDipotong = totalKoinFitur + realKoinAi;
+  
+  // Business Rule: Minimal pemotongan keseluruhan adalah 2 koin untuk menjaga biaya operasional
+  // kecuali jika ini adalah Free Trial (akan ditangani di node transaksi)
+  const totalWithMin = Math.max(2, finalDipotong);
+
+  return { 
+    realCostUsd, 
+    realKoinAi, 
+    totalDipotong: totalWithMin 
+  };
 };
 
 /**

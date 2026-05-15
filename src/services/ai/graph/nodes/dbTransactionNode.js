@@ -26,9 +26,10 @@ const dbTransactionNode = async (state) => {
   const urls = generatedImageUrls ?? [];
   const saveToHistory = activeFeatures.includes("HISTORY");
   const mockTryOnImage = activeFeatures.includes("VIRTUAL_TRY_ON") ? urls : null;
-  const finalTotalDipotong = totalDipotong;
   const igCost = imageGenCostUsd ?? 0;
   const igKoin = imageGenKoin ?? 0;
+  const rawTotal = (billingBase?.totalKoinFitur || 0) + (realBilling?.realKoinAi || 0) + igKoin;
+  const finalTotalDipotong = Math.max(2, rawTotal);
   const igUsage = normalizeOpenAiCompatibleUsage(imageGenUsage);
   const usage = normalizeOpenAiCompatibleUsage(llmUsage);
 
@@ -134,12 +135,13 @@ const dbTransactionNode = async (state) => {
       data: { sisa_credit: { decrement: amountToDeduct } },
     });
 
-    return { aiRecord, sisa_credit_after };
+    return { aiRecord, sisa_credit_after, totalDipotong: finalTotalDipotong };
   });
 
   return {
     resultTx: resultTx.aiRecord,
-    sisa_credit_after: resultTx.sisa_credit_after
+    sisa_credit_after: resultTx.sisa_credit_after,
+    totalDipotong: resultTx.totalDipotong,
   };
 };
 

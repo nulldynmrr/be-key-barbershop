@@ -1,15 +1,3 @@
-/**
- * Registry modul prompt per fitur — satu sumber kebenaran untuk promptBuilder.
- * Require statis agar bundler/IDE/linter mengenali dependensi (bukan require dinamis ber-string).
- *
- * Kunci harus selaras dengan kode fitur (FEATURE_GATE_MAP / activeFeatures).
- *
- * INVENTARIS FILE `prompts/` (semua terpakai lewat builder atau registry):
- * - base.prompt.js, systemPersona.js → promptBuilder.js (selalu)
- * - featurePromptRegistry.js → INI file index (bukan konten fitur); di-require promptBuilder
- * - faceHeatmap, symmetry, advMapping, hairAnalysis, riskAnalysis, barberInstructions,
- *   trendAnalysis, virtualTryOn → FEATURE_PROMPTS + FEATURE_PROMPT_LOAD_ORDER
- */
 const FEATURE_PROMPTS = {
   FACE_HEATMAP: require("./faceHeatmap"),
   SYMMETRY: require("./symmetry"),
@@ -21,7 +9,6 @@ const FEATURE_PROMPTS = {
   VIRTUAL_TRY_ON: require("./virtualTryOn"),
 };
 
-/** Urutan merge field (stabil): base dulu, lalu fitur dalam urutan ini */
 const FEATURE_PROMPT_LOAD_ORDER = [
   "FACE_HEATMAP",
   "SYMMETRY",

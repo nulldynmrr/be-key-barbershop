@@ -68,7 +68,6 @@ const billingNode = async (state) => {
         featHairAnalysis: false,
         featRiskAnalysis: false,
         featBarberInstructions: false,
-        // Free trial: coba Virtual Try-On 1x; fitur premium lain lewat FREE_TRIAL_BLOCKED_FEATURES
         featVirtualTryOn: false,
         virtualTryOnLimit: 0,
         featHistory: true,
@@ -150,11 +149,11 @@ const billingNode = async (state) => {
   }
 
   const imageBase64 = file.buffer.toString("base64");
-  
+
   // Use existing path if it's already in ai_results (from Multer + OptimizeImage)
   let url_foto_upload = "";
   const relativeFromPath = file.path ? file.path.replace(/\\/g, "/").replace(/.*uploads\/ai_results\//, "uploads/ai_results/") : null;
-  
+
   if (relativeFromPath && relativeFromPath.includes("uploads/ai_results/")) {
     url_foto_upload = `/${relativeFromPath}`;
   } else {
@@ -164,7 +163,7 @@ const billingNode = async (state) => {
     const fileName = `${Date.now()}-${cleanName}${file.mimetype === "image/webp" ? ".webp" : ""}`;
     const uploadDir = path.join(process.cwd(), "uploads", "ai_results");
     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    
+
     const filePath = path.join(uploadDir, fileName);
     await fs.promises.writeFile(filePath, file.buffer);
     url_foto_upload = `/uploads/ai_results/${fileName}`;

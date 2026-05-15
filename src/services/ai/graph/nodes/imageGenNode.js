@@ -59,19 +59,11 @@ const imageGenNode = async (state) => {
       };
     }
 
-    const real = calculateRealBilling(usageNorm, configImageGen, billingBase, 0);
-    let imageGenCostUsd = real.realCostUsd;
-    let imageGenKoin = real.realKoinAi;
-
     const successCount = generatedImageUrls.filter(Boolean).length;
-    if (real.realCostUsd === 0 && successCount > 0 && configImageGen.pricingUnit === "IMAGE") {
-      const per = Number(configImageGen.hargaPerImage) || 0;
-      if (per > 0) {
-        const fb = calculateImageGenBilling(per * successCount, billingBase);
-        imageGenCostUsd = per * successCount;
-        imageGenKoin = fb.imageGenKoin;
-      }
-    }
+    const real = calculateRealBilling(usageNorm, configImageGen, billingBase, 0, successCount);
+    
+    const imageGenCostUsd = real.realCostUsd;
+    const imageGenKoin = real.realKoinAi;
 
     const additionalCost = imageGenKoin;
 
