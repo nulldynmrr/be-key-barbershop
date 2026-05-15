@@ -27,14 +27,25 @@ exports.analyzeFace = async (req, res) => {
       });
     }
 
+    // Set headers untuk streaming agar frontend bisa baca progress secara real-time
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const onStatusUpdate = (nodeName) => {
+      res.write(JSON.stringify({ type: 'status', node: nodeName }) + '\n');
+    };
+
     const result = await aiService.processFaceAnalysis(
       req.user.id,
       req.file,
       validation.data.requestedFeatures,
-      req.body.source
+      req.body.source,
+      onStatusUpdate
     );
 
-    return success(res, {
+    // Kirim hasil akhir
+    res.write(JSON.stringify({ 
+      type: 'final',
       message: result.kualitas_ok
         ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong.`
         : `Kualitas foto kurang baik: ${result.alasan}.`,
@@ -46,24 +57,33 @@ exports.analyzeFace = async (req, res) => {
         hasil_analisis: result.hasil_analisis,
         active_features: result.activeFeatures,
       },
-      meta: {
-        usage_info: {
-          tokens: result.total_tokens,
-          cost_usd: result.realCostUsd,
-          service_fee: result.totalKoinFitur,
-          token_fee: result.realKoinAi,
-          image_gen_fee: result.imageGenKoin || 0,
-          credit_before: result.sisa_credit_before,
-          credit_after: result.sisa_credit_after,
-        }
+      usage_info: {
+        tokens: result.total_tokens,
+        cost_usd: result.realCostUsd,
+        service_fee: result.totalKoinFitur,
+        token_fee: result.realKoinAi,
+        image_gen_fee: result.imageGenKoin || 0,
+        credit_before: result.sisa_credit_before,
+        credit_after: result.sisa_credit_after,
       }
-    });
+    }) + '\n');
+    
+    return res.end();
   } catch (error) {
-    return sendError(res, {
+    // Jika error terjadi saat streaming sudah dimulai, kirim error dalam format JSON chunk
+    const errorPayload = {
+      type: 'error',
       statusCode: error.statusCode || 500,
       errorCode: error.errorCode || "AI_PROCESSING_ERROR",
       message: error.message || "Gagal memproses AI.",
-    });
+    };
+
+    if (res.headersSent) {
+      res.write(JSON.stringify(errorPayload) + '\n');
+      return res.end();
+    }
+
+    return sendError(res, errorPayload);
   }
 };
 

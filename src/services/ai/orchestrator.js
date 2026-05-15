@@ -29,7 +29,7 @@ const compiledGraph = workflow.compile();
  * @param {string[]} requestedFeatures
  * @returns {object}
  */
-const processFaceAnalysis = async (userId, file, requestedFeatures, source = "file") => {
+const processFaceAnalysis = async (userId, file, requestedFeatures, source = "file", onStatusUpdate) => {
   const initialState = {
     userId,
     file,
@@ -39,7 +39,19 @@ const processFaceAnalysis = async (userId, file, requestedFeatures, source = "fi
 
   let finalState;
   try {
-    finalState = await compiledGraph.invoke(initialState);
+    // Gunakan .stream() untuk mendapatkan progress tiap node secara real-time
+    const eventStream = await compiledGraph.stream(initialState);
+    let currentState = initialState;
+
+    for await (const chunk of eventStream) {
+      const nodeName = Object.keys(chunk)[0];
+      if (onStatusUpdate && nodeName) {
+        onStatusUpdate(nodeName);
+      }
+      // Merge the node's output into our tracked state
+      currentState = { ...currentState, ...chunk[nodeName] };
+      finalState = currentState;
+    }
   } catch (err) {
     // If the graph fails, we don't have finalState yet. 
     // Any cleanup would need to happen inside nodes or we'd need to catch the url elsewhere.
