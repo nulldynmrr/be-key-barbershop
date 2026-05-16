@@ -47,18 +47,7 @@ const buildDynamicPrompt = (activeFeatures, options = {}) => {
   }
 
 
-  // Fallback jika BARBER_INSTRUCTIONS tidak aktif — field JSON tetap ada (perilaku lama, tidak menghapus data).
-  if (!activeFeatures.includes("BARBER_INSTRUCTIONS")) {
-    templateFields.push(`  "instruksi_barber": string`);
-    promptSections.push(`- Isi 'instruksi_barber' dengan instruksi singkat untuk barber.`);
-  }
-
-  // Fallback if TREND_ANALYSIS is not active
-  if (!activeFeatures.includes("TREND_ANALYSIS")) {
-    systemSections.push(
-      `- Rekomendasikan 5 gaya rambut sesuai proporsi wajah. Referensi rentang ${currentYear - 5}–${currentYear}.`,
-    );
-  }
+  // Dynamic prompt modules are already handled in the loop above.
 
   if (staleRefreshPreviousAnalysis && typeof staleRefreshPreviousAnalysis === "object") {
     const prev = staleRefreshPreviousAnalysis;
@@ -85,8 +74,7 @@ ${templateFields.join(",\n")},
     {
 ${rekomendasiFields.join(",\n")}
     }
-  ],
-  "catatan_stylist": string
+  ]
 }`;
 
   const systemInstruction = `

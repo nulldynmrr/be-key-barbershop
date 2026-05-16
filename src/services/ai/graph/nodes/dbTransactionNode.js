@@ -126,28 +126,42 @@ const dbTransactionNode = async (state) => {
         throw err;
       }
 
-      // Check specific balance for active package
-      const activeBalance = await tx.userPackageBalance.findUnique({
-        where: {
-          user_id_package_id: {
-            user_id: userId,
-            package_id: currentUser.active_package_id,
-          },
-        },
+      // Fetch all packages with coins remaining
+      const allUserBalances = await tx.userPackageBalance.findMany({
+        where: { user_id: userId, coins_remaining: { gt: 0 } },
+        orderBy: [
+          { package_id: currentUser.active_package_id === null ? "asc" : (currentUser.active_package_id ? "desc" : "asc") }, // Simple trick to prioritize active (needs proper logic)
+          { purchased_at: "asc" }
+        ]
       });
 
-      if (!activeBalance || activeBalance.coins_remaining < finalTotalDipotong) {
-        const err = new Error(`Koin pada paket aktif (${membershipName}) tidak mencukupi.`);
+      // Proper sorting: active first, then others by purchase date
+      const sortedBalances = [...allUserBalances].sort((a, b) => {
+        if (a.package_id === currentUser.active_package_id) return -1;
+        if (b.package_id === currentUser.active_package_id) return 1;
+        return a.purchased_at - b.purchased_at;
+      });
+
+      const totalAvailable = sortedBalances.reduce((sum, b) => sum + b.coins_remaining, 0);
+
+      if (totalAvailable < finalTotalDipotong) {
+        const err = new Error(`Total koin Anda (${totalAvailable}) tidak mencukupi untuk transaksi ini (Butuh ${finalTotalDipotong}). Silakan isi ulang.`);
         err.statusCode = 402;
         err.errorCode = "INSUFFICIENT_CREDITS";
         throw err;
       }
 
-      // Deduct from the specific package balance
-      await tx.userPackageBalance.update({
-        where: { id: activeBalance.id },
-        data: { coins_remaining: { decrement: finalTotalDipotong } },
-      });
+      let remainingToDeduct = finalTotalDipotong;
+      for (const balance of sortedBalances) {
+        if (remainingToDeduct <= 0) break;
+
+        const amountFromThisPackage = Math.min(balance.coins_remaining, remainingToDeduct);
+        await tx.userPackageBalance.update({
+          where: { id: balance.id },
+          data: { coins_remaining: { decrement: amountFromThisPackage } }
+        });
+        remainingToDeduct -= amountFromThisPackage;
+      }
     }
 
     // 2. Re-calculate total aggregate sisa_credit for the user

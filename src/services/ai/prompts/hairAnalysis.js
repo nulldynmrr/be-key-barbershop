@@ -1,5 +1,6 @@
 module.exports = {
   templateFields: [
+    `  "ketebalan_rambut": "Tipis"|"Normal"|"Tebal"`,
     `  "ketebalan_rambut_mm": number`,
     `  "kepadatan_rambut": number_0_to_100`,
     `  "kesehatan_kulit_kepala": number_0_to_100`,

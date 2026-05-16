@@ -25,6 +25,34 @@ function extractBudgetAndMessage(aiError) {
 
 exports.invokeLLM = async ({ configAi, systemInstruction, promptText, imageBase64, file, userId }) => {
   const decryptedApiKey = decrypt(configAi.apiKey);
+  const isMock = decryptedApiKey === 'sk-dummy-key';
+
+  if (isMock) {
+    console.log(`[MOCK AI] Returning dummy analysis for testing...`);
+    return {
+      hasil_analisis: {
+        kualitas_foto_ok: true,
+        gender: "Pria",
+        bentuk_wajah: "Oval",
+        deskripsi_bentuk_wajah: "Wajah oval yang seimbang dan simetris.",
+        skor_simetri: 95,
+        level_simetri: "Excellent",
+        ai_confidence: 99,
+        jenis_rambut: "Lurus",
+        ketebalan_rambut: "Tebal",
+        heatmap_wajah: { dahi: "High Suitability", pipi: "Mid Suitability", rahang: "Low Suitability", dagu: "High Suitability", zona_terbaik: "Dahi" },
+        peta_proporsi: { dahi: 32, pipi_kiri: 15, pipi_kanan: 15, rahang: 20, dagu: 18 },
+        pengukuran_fitur: { panjang_wajah: 85, kekuatan_rahang: 75, lebar_tulang_pipi: 90, lebar_dahi: 80, lebar_wajah: 100 },
+        keseimbangan_wajah: { mata_kiri_kanan: "Symmetric", alis_kiri_kanan: "Aligned", pemusatan_hidung: "Centered", kelurusan_mulut: "Straight" },
+        rekomendasi_gaya: [
+          { nama_gaya: "Classic Pompadour", match_score: 98, alasan: "Cocok dengan bentuk wajah oval Anda.", petunjuk_barber: "Potong bagian samping sangat pendek." },
+          { nama_gaya: "Modern Fade", match_score: 92, alasan: "Memberikan kesan modern dan segar.", petunjuk_barber: "Gunakan gradasi yang halus." }
+        ]
+      },
+      llmUsage: { prompt_tokens: 100, completion_tokens: 200, total_tokens: 300 }
+    };
+  }
+
   const baseURL = normalizeOpenAiBaseUrl(configAi.baseUrl);
 
   const llm = new ChatOpenAI({

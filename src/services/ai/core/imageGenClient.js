@@ -140,6 +140,17 @@ const generateVirtualTryOn = async (configImageGen, file, hasilAnalisis, userPac
   let styleJobs = [];
 
   try {
+    const isMock = decrypt(configImageGen.apiKey) === 'sk-dummy-key';
+    if (isMock) {
+      console.log(`[MOCK IMAGE GEN] Returning dummy images for testing...`);
+      return {
+        generatedImageUrls: ["/images/logo-navbar.png"], // Using an existing image as placeholder
+        imageGenUsage: { prompt_tokens: 500, completion_tokens: 500, total_tokens: 1000 },
+        imageGenAttemptCount: 1,
+        imageGenSuccessCount: 1
+      };
+    }
+
     let limit = userPackage.virtualTryOnLimit > 0 ? userPackage.virtualTryOnLimit : 1;
     if (isFreeTrial) limit = 1;
 

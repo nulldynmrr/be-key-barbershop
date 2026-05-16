@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const { success, error: sendError } = require("../utils/response.helper");
+const { transformUserResponse } = require("../utils/userTransform");
 
 const getProfile = async (req, res, next) => {
   try {
@@ -32,7 +33,7 @@ const getProfile = async (req, res, next) => {
       return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
 
-    return success(res, { data: user });
+    return success(res, { data: transformUserResponse(user) });
   } catch (error) {
     return sendError(res, { message: error.message });
   }

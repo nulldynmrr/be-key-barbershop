@@ -92,26 +92,41 @@ exports.getAvailableFeatures = async (req, res) => {
     const userId = req.user?.id;
     const pricingList = await prisma.featurePricing.findMany({ orderBy: { featureCode: "asc" } });
 
-    let userPackage = null;
+    let userPackages = [];
     if (userId) {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        include: { active_package: true },
+      const balances = await prisma.userPackageBalance.findMany({
+        where: { 
+          user_id: userId,
+          coins_remaining: { gt: 0 }
+        },
+        include: { package: true },
       });
-      userPackage = user?.active_package || null;
+      userPackages = balances.map(b => b.package).filter(Boolean);
     }
 
     const features = {};
     for (const fp of pricingList) {
       const col = FEATURE_GATE_MAP[fp.featureCode];
       const globallyActive = fp.isActive;
-      const inPackage = userPackage ? !!userPackage[col] : false;
+      
+      // Feature is in package if ANY of the user's packages has it set to true
+      const inPackage = userPackages.some(pkg => !!pkg[col]);
+      
+      // Handle Free Trial logic for availability display
+      let available = globallyActive && inPackage;
+      
+      if (!inPackage && req.user?.tipe_akun === "free" && (req.user?.sisa_credit || 0) > 0) {
+        if (fp.featureCode === "STANDARD_SCAN" || fp.featureCode === "HISTORY") {
+          available = globallyActive;
+        }
+      }
+      
       features[fp.featureCode] = {
         namaFitur: fp.namaFitur,
         koinCost: fp.koinCost,
         globallyActive,
         inPackage,
-        available: globallyActive && inPackage,
+        available,
       };
     }
 

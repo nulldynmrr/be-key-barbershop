@@ -24,10 +24,14 @@ const billingNode = async (state) => {
 
   await compressImageIfNeeded(file);
 
-  const [user, sysConfigFromDb, pricingListFromDb, configAiFromDb, configImageGenFromDb] = await Promise.all([
+  const [user, userBalances, sysConfigFromDb, pricingListFromDb, configAiFromDb, configImageGenFromDb] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       include: { active_package: { include: { llmModel: true, imageModel: true } } },
+    }),
+    prisma.userPackageBalance.findMany({
+      where: { user_id: userId, coins_remaining: { gt: 0 } },
+      include: { package: true }
     }),
     cache.get("sysConfig") ? null : prisma.systemConfig.findFirst(),
     cache.get("pricingList") ? null : prisma.featurePricing.findMany(),
@@ -56,7 +60,9 @@ const billingNode = async (state) => {
     throw err;
   }
 
+  // STRICT GATING: Only use features from the CURRENTLY ACTIVE package
   let userPackage = user?.active_package;
+
   if (!userPackage) {
     if (user && user.tipe_akun === "free" && user.sisa_credit > 0) {
       userPackage = {
@@ -78,6 +84,7 @@ const billingNode = async (state) => {
     } else {
       const err = new Error("Anda belum memiliki paket aktif. Silakan beli paket terlebih dahulu.");
       err.statusCode = 403;
+      err.errorCode = "NO_ACTIVE_PACKAGE";
       throw err;
     }
   }
@@ -109,14 +116,6 @@ const billingNode = async (state) => {
     activeFeatures.push(code);
   }
 
-  if (deniedByPackage.length > 0) {
-    const err = new Error(
-      `Akses Ditolak: Fitur ${deniedByPackage.map((f) => `'${f}'`).join(", ")} tidak termasuk dalam paket '${userPackage.namaPaket}' Anda.`,
-    );
-    err.statusCode = 403;
-    throw err;
-  }
-
   if (activeFeatures.includes("VIRTUAL_TRY_ON") && !configImageGen) {
     reportSystemError(
       "AI_ORCHESTRATOR",
@@ -142,9 +141,10 @@ const billingNode = async (state) => {
 
   if (!isFreeTrial && user.sisa_credit < billingBase.minKoinRequired) {
     const err = new Error(
-      `Credit tidak mencukupi. Estimasi butuh ${billingBase.minKoinRequired} koin (Fitur: ${billingBase.totalKoinFitur}, Token AI: ${billingBase.estKoinAi}). Sisa: ${user.sisa_credit}.`,
+      `Credit tidak mencukupi. Estimasi butuh ${billingBase.minKoinRequired} koin. Sisa koin Anda: ${user.sisa_credit}. Silakan beli paket terlebih dahulu.`
     );
     err.statusCode = 402;
+    err.errorCode = "INSUFFICIENT_CREDITS";
     throw err;
   }
 
