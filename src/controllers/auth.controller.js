@@ -79,6 +79,14 @@ exports.googleLogin = async (req, res) => {
       where: {
         email,
       },
+      include: {
+        active_package: true,
+        package_balances: {
+          include: {
+            package: true
+          }
+        }
+      }
     });
 
     if (!user) {
@@ -359,6 +367,14 @@ exports.userLogin = async (req, res) => {
       where: {
         email,
       },
+      include: {
+        active_package: true,
+        package_balances: {
+          include: {
+            package: true
+          }
+        }
+      }
     });
 
     if (!user || user.role !== "user") {

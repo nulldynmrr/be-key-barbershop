@@ -5,6 +5,7 @@ const {
   getAiHistory,
   getTransactions,
   resolveUserEmail,
+  switchPackage,
 } = require("../controllers/user.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 
@@ -21,7 +22,7 @@ router.use(verifyToken);
 
 /**
  * @swagger
- * /user/profile:
+ * /users/profile:
  *   get:
  *     summary: Ambil profil diri sendiri
  *     tags: [User Area]
@@ -56,7 +57,7 @@ router.put("/profile", updateProfile);
 
 /**
  * @swagger
- * /user/ai-history:
+ * /users/ai-history:
  *   get:
  *     summary: Ambil riwayat generate AI milik sendiri
  *     tags: [User Area]
@@ -81,7 +82,7 @@ router.get("/ai-history", getAiHistory);
 
 /**
  * @swagger
- * /user/transactions:
+ * /users/transactions:
  *   get:
  *     summary: Ambil riwayat transaksi milik sendiri
  *     tags: [User Area]
@@ -103,6 +104,7 @@ router.get("/ai-history", getAiHistory);
  *         description: Berhasil mengambil riwayat transaksi
  */
 router.get("/transactions", getTransactions);
+router.post("/switch-package", switchPackage);
 // router.get("/:id/resolve-email", resolveUserEmail); // MOVED TO ADMIN ROUTES FOR SECURITY
 
 module.exports = router;

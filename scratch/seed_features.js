@@ -1,33 +1,32 @@
-const { PrismaClient } = require("@prisma/client");
-const prisma = new PrismaClient();
+const prisma = require("../src/config/prisma");
 
-async function seedFeatures() {
+async function seedFeaturePricing() {
   const features = [
-    { code: "STANDARD_SCAN", name: "Face Shape Analysis" },
-    { code: "FACE_HEATMAP", name: "Face Heatmap" },
-    { code: "SYMMETRY", name: "Face Symmetry Analysis" },
-    { code: "ADV_MAPPING", name: "Advanced Facial Mapping" },
-    { code: "HAIR_ANALYSIS", name: "Hair Type & Texture Analysis" },
-    { code: "RISK_ANALYSIS", name: "Scalp & Hair Risk Analysis" },
-    { code: "BARBER_INSTRUCTIONS", name: "Detailed Barber Instructions" },
-    { code: "VIRTUAL_TRY_ON", name: "AI Virtual Try-On" },
-    { code: "HISTORY", name: "Analysis History" },
-    { code: "TREND_ANALYSIS", name: "Personal Style Trend Analysis" },
+    { featureCode: "STANDARD_SCAN", namaFitur: "Standard Face Scan", koinCost: 0, isActive: true },
+    { featureCode: "FACE_HEATMAP", namaFitur: "Facial Feature Heatmap", koinCost: 0, isActive: true },
+    { featureCode: "SYMMETRY", namaFitur: "Face Symmetry Analysis", koinCost: 0, isActive: true },
+    { featureCode: "ADV_MAPPING", namaFitur: "Advanced Facial Mapping", koinCost: 0, isActive: true },
+    { featureCode: "HAIR_ANALYSIS", namaFitur: "Hair Texture & Growth Analysis", koinCost: 0, isActive: true },
+    { featureCode: "RISK_ANALYSIS", namaFitur: "Scalp & Hair Risk Assessment", koinCost: 0, isActive: true },
+    { featureCode: "BARBER_INSTRUCTIONS", namaFitur: "Detailed Barber Instructions", koinCost: 0, isActive: true },
+    { featureCode: "VIRTUAL_TRY_ON", namaFitur: "Virtual Hairstyle Try-On", koinCost: 0, isActive: true },
+    { featureCode: "HISTORY", namaFitur: "AI Analysis History", koinCost: 0, isActive: true },
+    { featureCode: "TREND_ANALYSIS", namaFitur: "Personalized Trend Matching", koinCost: 0, isActive: true },
   ];
+
+  console.log("Seeding FeaturePricing...");
 
   for (const f of features) {
     await prisma.featurePricing.upsert({
-      where: { featureCode: f.code },
-      update: {},
-      create: {
-        featureCode: f.code,
-        namaFitur: f.name,
-        koinCost: f.code === "VIRTUAL_TRY_ON" ? 0 : 0, // Costs are now part of package logic but we can set 0
-        isActive: true
-      }
+      where: { featureCode: f.featureCode },
+      update: f,
+      create: f,
     });
+    console.log(`- Seeded ${f.featureCode}`);
   }
-  console.log("Features seeded successfully.");
+
+  console.log("Seeding completed.");
+  process.exit(0);
 }
 
-seedFeatures().catch(console.error).finally(() => prisma.$disconnect());
+seedFeaturePricing();

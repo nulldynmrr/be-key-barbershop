@@ -98,7 +98,7 @@ const dbTransactionNode = async (state) => {
           input_tokens: igUsage.prompt_tokens,
           output_tokens: igUsage.completion_tokens,
           total_tokens: igUsage.total_tokens,
-          cost_usd: igCost,
+          cost_usd: igCost > 0 ? igCost : Number(configImageGen.hargaPerImage),
           koin_charged: igKoin,
           service_fee_koin: 0,
           token_fee_koin: igKoin,
@@ -116,25 +116,55 @@ const dbTransactionNode = async (state) => {
     // 1. Re-verify credit balance inside the transaction to prevent race conditions
     const currentUser = await tx.user.findUnique({
       where: { id: userId },
-      select: { sisa_credit: true }
+      select: { sisa_credit: true, active_package_id: true }
     });
 
-    if (!isFreeTrial && currentUser.sisa_credit < finalTotalDipotong) {
-      const err = new Error("Credit tidak mencukupi (terdeteksi perubahan saldo bersamaan).");
-      err.statusCode = 402;
-      err.errorCode = "INSUFFICIENT_CREDITS";
-      throw err;
+    if (!isFreeTrial) {
+      if (!currentUser.active_package_id) {
+        const err = new Error("Anda tidak memiliki paket aktif.");
+        err.statusCode = 403;
+        throw err;
+      }
+
+      // Check specific balance for active package
+      const activeBalance = await tx.userPackageBalance.findUnique({
+        where: {
+          user_id_package_id: {
+            user_id: userId,
+            package_id: currentUser.active_package_id,
+          },
+        },
+      });
+
+      if (!activeBalance || activeBalance.coins_remaining < finalTotalDipotong) {
+        const err = new Error(`Koin pada paket aktif (${membershipName}) tidak mencukupi.`);
+        err.statusCode = 402;
+        err.errorCode = "INSUFFICIENT_CREDITS";
+        throw err;
+      }
+
+      // Deduct from the specific package balance
+      await tx.userPackageBalance.update({
+        where: { id: activeBalance.id },
+        data: { coins_remaining: { decrement: finalTotalDipotong } },
+      });
     }
 
-    const amountToDeduct = isFreeTrial ? Math.min(currentUser.sisa_credit, finalTotalDipotong) : finalTotalDipotong;
-    const sisa_credit_after = Math.max(0, currentUser.sisa_credit - amountToDeduct);
+    // 2. Re-calculate total aggregate sisa_credit for the user
+    const allBalances = await tx.userPackageBalance.findMany({
+      where: { user_id: userId },
+      select: { coins_remaining: true },
+    });
+    
+    const totalSisaCredit = allBalances.reduce((sum, b) => sum + b.coins_remaining, 0);
 
-    await tx.user.update({
+    // 3. Update User table sisa_credit for synchronization
+    const updatedUser = await tx.user.update({
       where: { id: userId },
-      data: { sisa_credit: { decrement: amountToDeduct } },
+      data: { sisa_credit: totalSisaCredit },
     });
 
-    return { aiRecord, sisa_credit_after, totalDipotong: finalTotalDipotong };
+    return { aiRecord, sisa_credit_after: updatedUser.sisa_credit, totalDipotong: finalTotalDipotong };
   });
 
   return {

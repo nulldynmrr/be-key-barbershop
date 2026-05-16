@@ -18,7 +18,7 @@ exports.requestId = (req, res, next) => {
  */
 exports.globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // Limit each IP to 1000 requests per window (more generous for dev/SPA)
+  max: 1000, // Limit each IP to 1000 requests per window
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
@@ -68,7 +68,7 @@ exports.distributedDedupe = (timeoutSeconds = 5) => {
       // Try to acquire lock using SystemApiLog as a temporary store 
       // (Better to have a dedicated RequestLock table, but this is a defensive move)
       // We use a unique constraint check if possible, or just a find-then-create
-      
+
       const existingLock = await prisma.systemApiLog.findFirst({
         where: {
           user_id: userId,
@@ -90,7 +90,7 @@ exports.distributedDedupe = (timeoutSeconds = 5) => {
         data: {
           user_id: userId,
           features_used: "LOCK",
-          model_name: req.path,
+          model_name: `SYSTEM_LOCK:${req.path}`,
           tgl_penggunaan: expiresAt,
           input_tokens: 0,
           output_tokens: 0,

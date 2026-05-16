@@ -37,31 +37,67 @@ exports.buyPackage = async (req, res) => {
       return sendError(res, { message: "Paket tidak ditemukan.", statusCode: 404 });
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        sisa_credit: { increment: pkg.jumlahKoin },
-        active_package_id: pkg.id,
-        status_langganan: true,
-      },
-    });
-
     const nominalDibayar = getEffectivePackagePriceIdr(pkg);
 
-    await prisma.transaction.create({
-      data: {
-        user_id: userId,
-        jenis_transaksi: "BUY_PACKAGE",
-        nominal: nominalDibayar,
-        status: "SUCCESS",
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Update atau buat balance untuk paket ini (Opsi A: Top-up koin jika paket sama dibeli lagi)
+      await tx.userPackageBalance.upsert({
+        where: {
+          user_id_package_id: {
+            user_id: userId,
+            package_id: pkg.id,
+          },
+        },
+        update: {
+          coins_purchased: { increment: pkg.jumlahKoin },
+          coins_remaining: { increment: pkg.jumlahKoin },
+        },
+        create: {
+          user_id: userId,
+          package_id: pkg.id,
+          coins_purchased: pkg.jumlahKoin,
+          coins_remaining: pkg.jumlahKoin,
+        },
+      });
+
+      // 2. Hitung total koin dari semua paket untuk di-sinkronkan ke sisa_credit
+      const allBalances = await tx.userPackageBalance.findMany({
+        where: { user_id: userId },
+        select: { coins_remaining: true },
+      });
+
+      const totalCoins = allBalances.reduce((sum, b) => sum + b.coins_remaining, 0);
+
+      // 3. Update User: Set paket aktif dan sinkronkan total koin
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          sisa_credit: totalCoins,
+          active_package_id: pkg.id,
+          status_langganan: true,
+          tipe_akun: "premium",
+        },
+        include: { active_package: true }
+      });
+
+      // 4. Catat transaksi
+      await tx.transaction.create({
+        data: {
+          user_id: userId,
+          jenis_transaksi: "BUY_PACKAGE",
+          nominal: nominalDibayar,
+          status: "SUCCESS",
+        },
+      });
+
+      return updatedUser;
     });
 
     return success(res, {
       message: `Berhasil membeli paket ${pkg.namaPaket}.`,
       data: {
-        sisa_credit_sekarang: updatedUser.sisa_credit,
-        active_package: pkg.namaPaket,
+        sisa_credit_sekarang: result.sisa_credit,
+        active_package: result.active_package?.namaPaket || pkg.namaPaket,
       },
     });
   } catch (error) {

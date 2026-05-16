@@ -82,7 +82,11 @@ const imageGenNode = async (state) => {
       throw err;
     }
 
-    console.warn(`[LangGraph imageGenNode] Non-critical error: ${err.message}. Lanjut tanpa gambar.`);
+    console.error(`[LangGraph imageGenNode] CRITICAL ERROR:`, err);
+    if (err.response) {
+      console.error(`[LangGraph imageGenNode] API Response Error Data:`, JSON.stringify(err.response.data));
+    }
+
     return {
       generatedImageUrls: [],
       imageGenCostUsd: 0,

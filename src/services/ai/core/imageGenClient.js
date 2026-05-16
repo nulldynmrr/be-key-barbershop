@@ -14,44 +14,90 @@ const { getStyleSilhouetteHint } = require("../utils/tryOnStyleHints");
 function extractImageFromChatMessage(msg) {
   if (!msg) return null;
 
-  if (Array.isArray(msg.content)) {
-    for (const part of msg.content) {
-      if (part.type === "image_url" && part.image_url?.url) {
-        const u = String(part.image_url.url).replace(/\s/g, "");
-        const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+=*)/i);
-        if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
-        if (u.startsWith("http")) return { type: "url", value: part.image_url.url.trim() };
-      }
-    }
-  }
-
-  if (Array.isArray(msg.images)) {
-    for (const img of msg.images) {
-      if (img.image_url?.url) {
-        const u = String(img.image_url.url).replace(/\s/g, "");
-        const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+=*)/i);
-        if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
-        if (String(img.image_url.url).trim().startsWith("http")) {
-          return { type: "url", value: img.image_url.url.trim() };
+  // 1. Native Gemini Format (candidates -> content -> parts -> inline_data)
+  if (msg.candidates && Array.isArray(msg.candidates)) {
+    for (const cand of msg.candidates) {
+      if (cand.content?.parts && Array.isArray(cand.content.parts)) {
+        for (const part of cand.content.parts) {
+          if (part.inlineData?.data) {
+            return { type: "base64", mime: (part.inlineData.mimeType || "image/jpeg").split("/")[1], value: part.inlineData.data };
+          }
+          if (part.fileData?.fileUri) {
+             return { type: "url", value: part.fileData.fileUri };
+          }
         }
       }
     }
   }
 
+  // 2. OpenAI Compatible Format (content as array of parts)
+  if (Array.isArray(msg.content)) {
+    for (const part of msg.content) {
+      if (part.type === "image_url" && part.image_url?.url) {
+        const u = String(part.image_url.url).replace(/\s/g, "");
+        const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=_-]+)/i);
+        if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
+        if (u.startsWith("http")) return { type: "url", value: part.image_url.url.trim() };
+      }
+      
+      // Gemini native style inside OpenAI-like content (handle both inlineData and inline_data)
+      const gData = part.inlineData || part.inline_data;
+      if (gData?.data) {
+        const mime = (gData.mimeType || gData.mime_type || "image/jpeg").split("/")[1] || "jpeg";
+        return { type: "base64", mime: mime.toLowerCase(), value: gData.data };
+      }
+
+      // Handle if image is directly in content part (some custom implementations)
+      if (part.image && typeof part.image === "string") {
+        return { type: "base64", mime: "jpeg", value: part.image };
+      }
+    }
+  }
+
+  // 3. Alternative images field (some routers)
+  if (Array.isArray(msg.images)) {
+    for (const img of msg.images) {
+      const url = typeof img === 'string' ? img : img.image_url?.url || img.url;
+      if (url) {
+        const u = String(url).replace(/\s/g, "");
+        const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=_-]+)/i);
+        if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
+        if (u.startsWith("http")) return { type: "url", value: url.trim() };
+      }
+    }
+  }
+
+  // 4. Content as string (Markdown or Raw Base64)
   if (msg.content && typeof msg.content === "string") {
     const compact = msg.content.replace(/\s/g, "");
-    const dataMatch = compact.match(/data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/]+=*)/i);
+    
+    // Scan for any data:image URI
+    const dataMatch = compact.match(/data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=_-]{10,})/i);
     if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
 
-    const rawB64 = msg.content.replace(/```[a-z]*\n?/g, "").replace(/\s/g, "").trim();
-    if (rawB64.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(rawB64.substring(0, 200))) {
-      return { type: "base64", mime: "jpeg", value: rawB64 };
+    // Scan for raw base64 that looks like an image (starts with certain headers or is just long and valid)
+    // Most JPEGs start with /9j/
+    const rawMatch = compact.match(/([A-Za-z0-9+/=_-]{500,})/);
+    if (rawMatch?.[1]) {
+      const val = rawMatch[1];
+      if (val.length > 5000) { // Small enough to be an image, but large enough to not be random text
+        return { type: "base64", mime: "jpeg", value: val };
+      }
     }
 
     const mdImgMatch = msg.content.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/);
     if (mdImgMatch?.[1]) return { type: "url", value: mdImgMatch[1] };
-    const urlMatch = msg.content.match(/(https?:\/\/[^\s]+(?:png|jpe?g|webp|gif|avif)[^\s]*)/i);
-    if (urlMatch?.[1]) return { type: "url", value: urlMatch[1] };
+
+    const htmlImgMatch = msg.content.match(/<img.*?src=["'](https?:\/\/.*?)["']/i);
+    if (htmlImgMatch?.[1]) return { type: "url", value: htmlImgMatch[1] };
+  }
+
+  // 5. Root field fallbacks
+  if (msg.image && typeof msg.image === "string") {
+     const u = msg.image.replace(/\s/g, "");
+     const dataMatch = u.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=_-]+)/i);
+     if (dataMatch) return { type: "base64", mime: dataMatch[1].toLowerCase(), value: dataMatch[2] };
+     return { type: "base64", mime: "jpeg", value: msg.image };
   }
 
   return null;
@@ -59,11 +105,27 @@ function extractImageFromChatMessage(msg) {
 
 /** Ambil blok usage dari respons chat completions (OpenAI / MAIA). */
 function extractUsageFromChatCompletionResponse(data) {
-  const top = data?.usage;
-  const fromChoice = data?.choices?.[0]?.usage;
-  if (top && typeof top === "object" && Object.keys(top).length > 0) return top;
-  if (fromChoice && typeof fromChoice === "object" && Object.keys(fromChoice).length > 0) return fromChoice;
-  return top || fromChoice || {};
+  if (!data || typeof data !== "object") return {};
+  
+  // Gemini/MAIA root usage
+  const top = data.usage;
+  if (top && typeof top === "object" && (top.total_tokens || top.prompt_tokens)) return top;
+  
+  // Alternative root names
+  if (data.usageMetadata) return data.usageMetadata;
+  
+  // OpenAI choices usage
+  const fromChoice = data.choices?.[0]?.usage;
+  if (fromChoice && typeof fromChoice === "object") return fromChoice;
+  
+  // Fallback check for any field containing 'token'
+  for (const key of Object.keys(data)) {
+    if (key.toLowerCase().includes("usage") && typeof data[key] === "object") {
+      return data[key];
+    }
+  }
+
+  return {};
 }
 
 /**
@@ -75,6 +137,7 @@ const generateVirtualTryOn = async (configImageGen, file, hasilAnalisis, userPac
   let generatedImageUrls = [];
   /** Agregat usage nyata dari respons router (per panggilan dijumlahkan). */
   let imageGenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+  let styleJobs = [];
 
   try {
     let limit = userPackage.virtualTryOnLimit > 0 ? userPackage.virtualTryOnLimit : 1;
@@ -85,7 +148,7 @@ const generateVirtualTryOn = async (configImageGen, file, hasilAnalisis, userPac
     }
     const rekomendasiGaya = hasilAnalisis.rekomendasi_gaya || [];
     /** Pasangkan nama gaya + alasan LLM agar image model mengikuti rekomendasi, bukan hanya string judul. */
-    let styleJobs = rekomendasiGaya.slice(0, limit).map((r) => ({
+    styleJobs = rekomendasiGaya.slice(0, limit).map((r) => ({
       nama: String(r?.nama_gaya || "").trim() || "modern haircut",
       alasan: String(r?.alasan || "").trim(),
     }));
@@ -164,84 +227,149 @@ ${instruksiDetail ? `- Styling details from barber: ${instruksiDetail}` : ""}
 Output ONLY the transformed image. Photorealistic quality. No text, no watermark.`;
 
       try {
+        const isGeminiImage = configImageGen.modelName.includes("gemini") && configImageGen.modelName.includes("image");
+        
+        const requestBody = {
+          model: configImageGen.modelName,
+          messages: [
+            {
+              role: "user",
+              content: editPrompt,
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${mimeForDataUrl};base64,${imageBase64}`,
+                  },
+                },
+              ],
+            },
+          ],
+          candidateCount: 1,
+          responseModalities: ["TEXT", "IMAGE"],
+          imageConfig: {
+            aspectRatio: tryOnAspectRatio === "1:1" ? "1:1" : (tryOnAspectRatio === "3:4" ? "3:4" : "4:3"),
+            imageSize: "1K"
+          }
+        };
+
         const response = await axios.post(
           chatCompletionsUrl,
-          {
-            model: configImageGen.modelName,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: editPrompt },
-                  { type: "image_url", image_url: { url: `data:${mimeForDataUrl};base64,${imageBase64}` } },
-                ],
-              },
-            ],
-            candidateCount: 1,
-            responseModalities: ["TEXT", "IMAGE"],
-            imageConfig: { aspectRatio: tryOnAspectRatio, imageSize: "1K" },
-          },
+          requestBody,
           {
             headers: {
               Authorization: `Bearer ${decrypt(configImageGen.apiKey)}`,
               "Content-Type": "application/json",
+              "Accept": "application/json",
             },
-            timeout: 180000,
+            timeout: 300000,
           },
         );
 
-        let extractedUrl = null;
-        const msg = response.data?.choices?.[0]?.message;
+        apiCallAttempted = true;
+        console.log(`[ImageGen Debug] Received response. Status: ${response.status}`);
+        
+        const contentType = response.headers['content-type'] || '';
+        let responseData;
 
-        if (process.env.DEBUG_AI_GRAPH === "1") {
-          console.log(`[Image Gen Debug] Response keys:`, Object.keys(response.data || {}));
-          console.log(`[Image Gen Debug] choices length:`, response.data?.choices?.length);
-          if (msg) {
-            console.log(`[Image Gen Debug] msg keys:`, Object.keys(msg));
-            console.log(
-              `[Image Gen Debug] msg.content type:`,
-              typeof msg.content,
-              Array.isArray(msg.content) ? `(array, length: ${msg.content.length})` : "",
-            );
-            if (Array.isArray(msg.content)) {
-              msg.content.forEach((part, i) => console.log(`[Image Gen Debug] content[${i}].type:`, part.type));
-            }
-            if (msg.images) console.log(`[Image Gen Debug] msg.images length:`, msg.images.length);
-          } else {
-            console.warn(
-              `[Image Gen Debug] msg is undefined/null! Full response.data:`,
-              JSON.stringify(response.data).substring(0, 500),
-            );
+        if (typeof response.data === 'object') {
+          responseData = response.data;
+          if (true) {
+            console.log(`[ImageGen Debug] JSON RESPONSE keys:`, Object.keys(responseData));
+          }
+        } else if (contentType.includes('image/')) {
+          console.log(`[ImageGen Debug] Received RAW BINARY IMAGE (${contentType})`);
+          const b64 = Buffer.isBuffer(response.data) 
+            ? response.data.toString('base64') 
+            : Buffer.from(response.data).toString('base64');
+          responseData = {
+            choices: [{
+              message: {
+                role: "assistant",
+                content: `data:${contentType};base64,${b64}`
+              }
+            }]
+          };
+        } else {
+          try {
+            responseData = JSON.parse(response.data.toString());
+          } catch (e) {
+            responseData = response.data;
           }
         }
 
-        if (msg) {
-          let extractedBase64 = null;
-          const extracted = extractImageFromChatMessage(msg);
-          if (extracted?.type === "base64") extractedBase64 = extracted.value;
-          else if (extracted?.type === "url") extractedUrl = extracted.value;
+        let extractedUrl = null;
+        let extractedBase64 = null;
 
-          if (extractedBase64) {
-            const genFileName = `tryon-${Date.now()}-${index}-${cleanName.replace(/\.[^.]+$/, "")}.webp`;
+        // [CRITICAL FIX] Try to extract from the entire responseData if choices is missing
+        // or extract from choices[0].message if it exists.
+        // [CRITICAL FIX] Try to extract from candidates (Native Gemini) or choices (OpenAI)
+        const msgObject = responseData?.choices?.[0]?.message || 
+                          responseData?.candidates?.[0]?.content ||
+                          responseData;
+
+        console.log(`[ImageGen Debug] Processing response for image extraction...`);
+        const extracted = extractImageFromChatMessage(msgObject);
+        
+        // LOG DEBUG: Simpan respons mentah jika ekstraksi gagal
+        if (!extracted) {
+          const debugPath = path.join(process.cwd(), "scratch", `failed_ext_${Date.now()}.json`);
+          fs.writeFileSync(debugPath, JSON.stringify(responseData, null, 2));
+          console.log(`[ImageGen Debug] WARNING: Ekstraksi gambar gagal. Respons mentah disimpan di: ${debugPath}`);
+        }
+        
+        if (extracted) {
+          console.log(`[ImageGen Debug] Extracted Type:`, extracted.type);
+          if (extracted.type === "base64") extractedBase64 = extracted.value;
+          else if (extracted.type === "url") extractedUrl = extracted.value;
+        }
+
+        if (extractedBase64) {
+            console.log(`[ImageGen Debug] Base64 length:`, extractedBase64.length);
+            const safeCleanName = (cleanName || "image").replace(/\.[^.]+$/, "");
+            const genFileName = `tryon-${Date.now()}-${index}-${safeCleanName}.webp`;
             const genFilePath = path.join(process.cwd(), "uploads", "ai_results", genFileName);
+            
             let imgBuffer = Buffer.from(extractedBase64, "base64");
+            console.log(`[ImageGen Debug] Buffer created, size:`, imgBuffer.length);
+
             try {
+              console.log(`[ImageGen Debug] Aligning image...`);
               imgBuffer = await alignTryOnImageToInput(file.buffer, imgBuffer);
             } catch (orientErr) {
               console.warn("[Image Gen] Orientasi try-on fallback:", orientErr.message);
             }
-            const webpBuffer = await sharp(imgBuffer).webp({ quality: 90 }).toBuffer();
-            fs.writeFileSync(genFilePath, webpBuffer);
-            extractedUrl = `/uploads/ai_results/${genFileName}`;
-            if (process.env.DEBUG_AI_GRAPH === "1") {
-              console.log(`[Image Gen] Gambar berhasil disimpan: ${extractedUrl}`);
-            }
-          } else {
-            console.warn(`[Image Gen] GAGAL extract gambar untuk gaya '${targetStyle}'. Tidak ada base64/URL yang ditemukan dari response.`);
-          }
-        }
 
-        const usage = normalizeOpenAiCompatibleUsage(extractUsageFromChatCompletionResponse(response.data));
+            console.log(`[ImageGen Debug] Converting to WebP via Sharp...`);
+            let webpBuffer;
+            try {
+              webpBuffer = await sharp(imgBuffer).webp({ quality: 90 }).toBuffer();
+              console.log(`[ImageGen Debug] Sharp conversion success, size:`, webpBuffer.length);
+            } catch (sharpErr) {
+              console.error(`[ImageGen Debug] Sharp conversion FAILED:`, sharpErr.message);
+              // Fallback: simpan raw buffer jika sharp gagal (untuk investigasi)
+              const rawFileName = `failed-${Date.now()}-${index}.raw`;
+              fs.writeFileSync(path.join(process.cwd(), "uploads", "ai_results", rawFileName), imgBuffer);
+              throw new Error(`Sharp failed to process image: ${sharpErr.message}`);
+            }
+            
+            console.log(`[ImageGen Debug] Writing file to:`, genFilePath);
+            fs.writeFileSync(genFilePath, webpBuffer);
+            
+            extractedUrl = `/uploads/ai_results/${genFileName}`;
+            console.log(`[ImageGen Debug] SUCCESS! URL:`, extractedUrl);
+          } else {
+            console.error(`[ImageGen Debug] FAILED! No image found in response.`);
+            console.log(`[ImageGen Debug] Object keys:`, Object.keys(msgObject || {}));
+            if (msgObject && msgObject.content) {
+              console.log(`[ImageGen Debug] Content (truncated):`, JSON.stringify(msgObject.content).substring(0, 1000));
+            }
+          }
+
+        const usage = normalizeOpenAiCompatibleUsage(extractUsageFromChatCompletionResponse(responseData));
         return {
           url: extractedUrl || null,
           usage,
@@ -292,6 +420,10 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
     const results = await Promise.all(styleJobs.map((job, idx) => generateSingleImage(job, idx)));
 
     generatedImageUrls = results.map((r) => r.url).filter(Boolean);
+    console.log(`[ImageGen Debug] TOTAL IMAGES GENERATED:`, generatedImageUrls.length);
+    if (generatedImageUrls.length === 0 && results.length > 0) {
+      console.warn(`[ImageGen Debug] WARNING: No images were successfully generated/extracted from ${results.length} attempts!`);
+    }
     results.forEach((r) => {
       imageGenUsage.prompt_tokens += r.usage?.prompt_tokens || 0;
       imageGenUsage.completion_tokens += r.usage?.completion_tokens || 0;
@@ -319,4 +451,4 @@ Output ONLY the transformed image. Photorealistic quality. No text, no watermark
   };
 };
 
-module.exports = { generateVirtualTryOn };
+module.exports = { generateVirtualTryOn, extractImageFromChatMessage };

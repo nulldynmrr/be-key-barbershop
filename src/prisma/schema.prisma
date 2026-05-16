@@ -42,6 +42,7 @@ model User {
 
   active_package_id      String?
   active_package         SubscriptionPackage? @relation(fields: [active_package_id], references: [id])
+  package_balances       UserPackageBalance[]
   audit_logs             AuditLog[]
 }
 
@@ -247,7 +248,24 @@ model SubscriptionPackage {
 
   status String @default("AKTIF")
 
-  users User[]
+  users    User[]
+  balances UserPackageBalance[]
+}
+
+model UserPackageBalance {
+  id              String              @id @default(uuid())
+  user_id         String
+  package_id      String
+  coins_purchased Int
+  coins_remaining Int
+  purchased_at    DateTime            @default(now())
+  updated_at      DateTime            @updatedAt
+
+  user    User                @relation(fields: [user_id], references: [id])
+  package SubscriptionPackage @relation(fields: [package_id], references: [id])
+
+  @@unique([user_id, package_id])
+  @@map("user_package_balances")
 }
 
 model FeaturePricing {

@@ -16,9 +16,11 @@ const getProfile = async (req, res, next) => {
         status_langganan: true,
         tgl_berakhir_langganan: true,
         createdAt: true,
-        active_package: {
-          select: {
-            namaPaket: true
+        active_package_id: true,
+        active_package: true,
+        package_balances: {
+          include: {
+            package: true
           }
         }
       },
@@ -143,4 +145,50 @@ const resolveUserEmail = async (req, res, next) => {
   }
 };
 
-module.exports = { getProfile, updateProfile, getAiHistory, getTransactions, resolveUserEmail };
+const switchPackage = async (req, res, next) => {
+  try {
+    const { package_id } = req.body;
+    const userId = req.user.id;
+
+    if (!package_id) {
+      return sendError(res, { statusCode: 400, message: "Package ID wajib diisi" });
+    }
+
+    // Check if user has balance for this package
+    const balance = await prisma.userPackageBalance.findUnique({
+      where: {
+        user_id_package_id: {
+          user_id: userId,
+          package_id: package_id,
+        },
+      },
+      include: { package: true }
+    });
+
+    if (!balance || balance.coins_remaining <= 0) {
+      return sendError(res, { 
+        statusCode: 400, 
+        message: "Paket tidak tersedia atau koin sudah habis. Silakan beli kembali." 
+      });
+    }
+
+    // Update active_package_id
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { active_package_id: package_id },
+      include: { active_package: true }
+    });
+
+    return success(res, {
+      message: `Berhasil berganti ke paket ${balance.package.namaPaket}`,
+      data: {
+        active_package: updatedUser.active_package,
+        sisa_credit: updatedUser.sisa_credit
+      }
+    });
+  } catch (error) {
+    return sendError(res, { message: error.message });
+  }
+};
+
+module.exports = { getProfile, updateProfile, getAiHistory, getTransactions, resolveUserEmail, switchPackage };
