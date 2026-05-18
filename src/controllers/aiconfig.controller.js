@@ -4,6 +4,33 @@ const { decrypt, encrypt } = require("../utils/encryption");
 const cache = require("../utils/memoryCache");
 
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
+const { resolveBalanceUrl } = require("../services/ai/core/openAiUrl");
+
+// Helper to fetch real balance from AI Provider (MAIA/OpenRouter)
+const fetchModelBalance = async (model) => {
+  try {
+    if (!model.baseUrl || !model.apiKey) return null;
+    
+    const balanceUrl = resolveBalanceUrl(model.baseUrl);
+    const apiKey = decrypt(model.apiKey);
+
+    const response = await axios.get(balanceUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      timeout: 5000 // 5s timeout
+    });
+
+    // MAIA/OpenRouter response usually: { data: { usage: 120, ... }, total_usage: 120 } or { credits: 120 }
+    // Based on user screenshot, MAIA value is around 120.
+    if (response.data) {
+      return response.data.total_usage || response.data.credits || response.data.data?.usage || 0;
+    }
+    return 0;
+  } catch (err) {
+    console.error(`[Balance Fetch] Error for ${model.namaRouter}:`, err.message);
+    return null;
+  }
+};
 
 exports.getExchangeSetting = async (req, res, next) => {
   try {
@@ -20,7 +47,7 @@ exports.getExchangeSetting = async (req, res, next) => {
         },
       });
     }
-    res.status(200).json({ success: true, data: config });
+    return success(res, { data: config });
   } catch (error) {
     next(error);
   }
@@ -34,8 +61,7 @@ exports.updateExchangeSetting = async (req, res, next) => {
       update: { globalMultiplier, baseRateUsdIdr, inflationBuffer },
       create: { id: 1, globalMultiplier, baseRateUsdIdr, inflationBuffer },
     });
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Master Exchange berhasil disimpan",
       data: config,
     });
@@ -55,19 +81,57 @@ exports.getAiModels = async (req, res, next) => {
     });
 
     const maskedModels = models.map((m) => {
-      const usage = apiLogsAgg.find(agg => agg.model_name === m.modelName || agg.model_name === m.namaRouter);
-      const usedBudget = usage && usage._sum.cost_usd ? parseFloat(usage._sum.cost_usd) : 0;
-      const isWarning = m.maxBudget > 0 && usedBudget >= (m.maxBudget * 0.8);
-
       return {
         ...m,
-        usedBudget,
-        isWarning,
         apiKey: "********" + m.apiKey.substring(m.apiKey.length - 4),
       };
     });
 
-    res.status(200).json({ success: true, data: maskedModels });
+    // Fetch realtime balance for active models (parallel)
+    const modelsWithBalance = await Promise.all(maskedModels.map(async (m) => {
+      if (m.isActive && m.maxBudget > 0) {
+        // Delta usage sejak admin terakhir sync saldo MAIA
+        const deltaUsage = await prisma.systemApiLog.aggregate({
+          _sum: { cost_usd: true },
+          where: {
+            model_name: m.modelName,
+            tgl_penggunaan: m.last_sync_at ? { gte: m.last_sync_at } : undefined,
+          },
+        });
+
+        const deltaUsed = Number(deltaUsage._sum.cost_usd || 0);
+
+        // Anchor: saldo MAIA saat sync. Fallback ke maxBudget bila belum pernah sync.
+        const baseBalance = m.last_maia_balance ?? m.maxBudget;
+        const remainingBudget = Math.max(0, Number(baseBalance) - deltaUsed);
+        const usedTotal = Number(m.maxBudget) - remainingBudget;
+        const usedPercent = (usedTotal / Number(m.maxBudget)) * 100;
+
+        // Fetch API real-time jika MAIA (opsional, tapi informatif di list)
+        let realtimeBalance = null;
+        if (m.namaRouter.toLowerCase().includes("maia")) {
+           realtimeBalance = await fetchModelBalance(m);
+        }
+
+        return {
+          ...m,
+          usedBudget: usedTotal.toFixed(4),
+          remainingBudget: remainingBudget.toFixed(4),
+          usedPercent: usedPercent.toFixed(1),
+          isWarning:  usedPercent >= 80,
+          isCritical: usedPercent >= 95,
+          lastSyncAt: m.last_sync_at,
+          realtimeBalance,
+          budgetSource: m.last_sync_at ? "maia_snapshot+db_delta" : "max_budget_only",
+          budgetNote: m.last_sync_at
+            ? `Saldo MAIA terakhir disync: ${m.last_sync_at.toISOString()}`
+            : "⚠️ Belum pernah sync — pakai maxBudget sebagai baseline",
+        };
+      }
+      return m;
+    }));
+
+    return success(res, { data: modelsWithBalance });
   } catch (error) {
     next(error);
   }
@@ -88,7 +152,7 @@ exports.getActiveModelsByType = async (req, res, next) => {
         orderBy: { namaRouter: "asc" },
       }),
     ]);
-    res.status(200).json({ success: true, data: { llm: llmModels, image_gen: imageModels } });
+    return success(res, { data: { llm: llmModels, image_gen: imageModels } });
   } catch (error) {
     next(error);
   }
@@ -102,7 +166,7 @@ exports.saveAiModel = async (req, res, next) => {
       namaRouter, baseUrl, modelName, apiKey,
       typeAi, pricingUnit,
       hargaInput1M, hargaOutput1M, hargaPerImage,
-      maxBudget, rpmLimit, isActive,
+      maxBudget, rpmLimit, isActive, lastMaiaBalance,
     } = req.body;
 
     // Normalkan unit harga:
@@ -113,11 +177,18 @@ exports.saveAiModel = async (req, res, next) => {
     const modelData = {
       namaRouter, baseUrl, modelName,
       typeAi, pricingUnit: resolvedUnit,
-      hargaInput1M: Number(hargaInput1M) || 0, // selalu berlaku untuk semua tipe
+      hargaInput1M: Number(hargaInput1M) || 0,
       hargaOutput1M: resolvedUnit === "TOKEN" ? Number(hargaOutput1M) || 0 : 0,
       hargaPerImage: resolvedUnit === "IMAGE" ? Number(hargaPerImage) || 0 : 0,
-      maxBudget, rpmLimit, isActive,
+      maxBudget: parseFloat(maxBudget) || 0,
+      rpmLimit: parseInt(rpmLimit) || 0,
+      isActive,
     };
+
+    if (lastMaiaBalance !== undefined) {
+      modelData.last_maia_balance = lastMaiaBalance;
+      modelData.last_sync_at = new Date();
+    }
 
     let modelConfig;
     if (id) {
@@ -125,12 +196,12 @@ exports.saveAiModel = async (req, res, next) => {
       modelConfig = await prisma.aiModel.update({ where: { id }, data: modelData });
     } else {
       if (!apiKey)
-        return res.status(400).json({ success: false, message: "API Key wajib diisi untuk model baru!" });
+        return sendError(res, { message: "API Key wajib diisi untuk model baru!" });
       modelData.apiKey = encrypt(apiKey);
       modelConfig = await prisma.aiModel.create({ data: modelData });
     }
 
-    res.status(200).json({ success: true, message: "Konfigurasi Model AI berhasil disimpan", data: modelConfig });
+    return success(res, { message: "Konfigurasi Model AI berhasil disimpan", data: modelConfig });
   } catch (error) {
     next(error);
   }
@@ -160,8 +231,7 @@ exports.toggleModelStatus = async (req, res, next) => {
     if (!isActive) {
       // Logic manual nonaktifkan paket dihapus agar status bersifat cerdas/dinamis
     }
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: `Router berhasil di-${isActive ? "aktifkan" : "matikan"}`,
     });
   } catch (error) {
@@ -192,7 +262,11 @@ exports.testConnection = async (req, res, next) => {
         .json({ success: false, message: "API Key tidak valid untuk ditest" });
     }
 
-    const response = await fetch(`${baseUrl}/models`, {
+    const { normalizeOpenAiBaseUrl } = require("../services/ai/core/openAiUrl");
+    const normalizedRoot = normalizeOpenAiBaseUrl(baseUrl);
+    const testUrl = normalizedRoot ? `${normalizedRoot}/models` : `${baseUrl}/models`;
+
+    const response = await fetch(testUrl, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -207,6 +281,84 @@ exports.testConnection = async (req, res, next) => {
       .json({ success: true, message: "Koneksi API Berhasil! Sistem siap." });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+exports.parseCurl = async (req, res, next) => {
+  try {
+    const { curl } = req.body;
+    if (!curl) return res.status(400).json({ success: false, message: "CURL string is required" });
+
+    // 1. Extract URL (Better regex: look specifically for http/https and stop at quotes or spaces)
+    const urlMatch = curl.match(/https?:\/\/[^\s'"]+/);
+    let fullUrl = urlMatch ? urlMatch[0] : "";
+    
+    // Clean up trailing slashes or quotes if any
+    fullUrl = fullUrl.replace(/['"]$/, "");
+
+    // 2. Extract API Key (Bearer token) - handle more variations
+    const authMatch = curl.match(/Bearer\s+([a-zA-Z0-9\-_.]+)/i);
+    const apiKey = authMatch ? authMatch[1] : "";
+
+    // 3. Extract JSON Data and Model Name
+    // Look for "model": "..." or 'model': '...'
+    const modelMatch = curl.match(/["']model["']\s*:\s*["']([^"']+)["']/);
+    let modelName = modelMatch ? modelMatch[1] : "";
+
+    // If still not found, try to parse data segment
+    if (!modelName) {
+      const dataMatch = curl.match(/--data(?:-raw)?\s+['"]({[^'"]+})['"]/);
+      if (dataMatch) {
+        try {
+          const jsonData = JSON.parse(dataMatch[1]);
+          modelName = jsonData.model || "";
+        } catch (e) {}
+      }
+    }
+
+    let typeAi = "CHAT";
+    let pricingUnit = "TOKEN";
+
+    // 4. Determine Type and Base URL
+    let baseUrl = fullUrl;
+    if (fullUrl.includes("/chat/completions")) {
+      typeAi = "CHAT";
+      pricingUnit = "TOKEN";
+      baseUrl = fullUrl.replace("/chat/completions", "");
+    } else if (fullUrl.includes("/images/generations")) {
+      typeAi = "IMAGE_GENERATION";
+      pricingUnit = "IMAGE";
+      baseUrl = fullUrl.replace("/images/generations", "");
+    } else if (fullUrl.includes("/images/edits")) {
+      typeAi = "IMAGE_EDIT";
+      pricingUnit = "IMAGE";
+      baseUrl = fullUrl.replace("/images/edits", "");
+    }
+
+    // Standardize Base URL (ensure /v1 suffix if it was in the original URL)
+    if (!baseUrl.endsWith("/v1") && fullUrl.includes("/v1/")) {
+       const v1Index = fullUrl.indexOf("/v1");
+       if (v1Index !== -1) {
+         baseUrl = fullUrl.substring(0, v1Index + 3);
+       }
+    }
+
+    // Fallback for namaRouter if modelName is empty
+    const displayRouterName = modelName ? (modelName.split("/").pop() || modelName) : "New Model";
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        namaRouter: displayRouterName,
+        modelName: modelName,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        typeAi: typeAi,
+        pricingUnit: pricingUnit
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: "Gagal memproses CURL: " + error.message });
   }
 };
 
@@ -237,13 +389,25 @@ exports.getAiUsageLogs = async (req, res, next) => {
     const globalMultiplier = config?.globalMultiplier || 1.35;
     const formattedLogs = logs.map((log) => {
       const modalUsd = Number(log.cost_usd);
-      const chargeUsd = modalUsd * globalMultiplier;
+      
+      // Use historical snapshot if available, otherwise fallback to dynamic calculation (for old data)
+      const userStatus = log.membership_snapshot 
+        ? log.membership_snapshot.toUpperCase()
+        : (log.user?.active_package?.namaPaket ? log.user.active_package.namaPaket.toUpperCase() : "FREE");
+
+      // For chargeUser: if snapshot exists (even if 0), use it. 
+      // If snapshot is null (old data), calculate dynamically.
+      const chargeUsd = log.membership_snapshot !== null
+        ? Number(log.charge_usd)
+        : (modalUsd * globalMultiplier);
+
       const profitUsd = chargeUsd - modalUsd;
+
       return {
         id: log.id,
         createdAt: log.tgl_penggunaan,
         userEmail: log.user?.email || "Guest",
-        userStatus: log.user?.active_package?.namaPaket ? log.user.active_package.namaPaket.toUpperCase() : "FREE",
+        userStatus: userStatus,
         promptTokens: log.input_tokens,
         completionTokens: log.output_tokens,
         modalApi: modalUsd.toFixed(5),
@@ -252,8 +416,7 @@ exports.getAiUsageLogs = async (req, res, next) => {
       };
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: formattedLogs,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
@@ -265,7 +428,7 @@ exports.getAiUsageLogs = async (req, res, next) => {
 exports.getFeaturePricing = async (req, res) => {
   try {
     const pricing = await prisma.featurePricing.findMany({ orderBy: { featureCode: "asc" } });
-    res.status(200).json({ success: true, data: pricing });
+    return success(res, { data: pricing });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -283,7 +446,7 @@ exports.getFeatureToggleMap = async (req, res, next) => {
         koinCost: fp.koinCost,
       };
     }
-    res.status(200).json({ success: true, data: result });
+    return success(res, { data: result });
   } catch (error) {
     next(error);
   }
@@ -301,13 +464,12 @@ exports.updateFeaturePrice = async (req, res) => {
 
     cache.delete("pricingList");
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Harga fitur berhasil diperbarui",
       data: updatedPricing,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -404,8 +566,7 @@ exports.calculateIdealKoin = async (req, res, next) => {
     const koinApiIdr = Math.ceil(modalApiIdr * multiplier / refHargaPerKoin);
     const totalKoinIdeal = totalKoinFitur + koinApiIdr;
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: {
         model_aktif: activeModel.namaRouter,
         pricing_unit: activeModel.pricingUnit,
@@ -418,6 +579,42 @@ exports.calculateIdealKoin = async (req, res, next) => {
         fitur_aktif: Object.entries(featureMap).filter(([, v]) => v).map(([k]) => k),
         catatan: "Koin ideal dihitung dengan asumsi harga referensi Rp 50/koin. Sesuaikan dengan harga paket aktual Anda.",
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getAiModelBalance = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const model = await prisma.aiModel.findUnique({ where: { id } });
+    if (!model) return sendError(res, { message: "Model tidak ditemukan" });
+
+    const balance = await fetchModelBalance(model);
+    return success(res, { data: { balance } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.syncModelBalance = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const model = await prisma.aiModel.findUnique({ where: { id } });
+    if (!model) return sendError(res, { message: "Model tidak ditemukan" });
+
+    const balance = await fetchModelBalance(model);
+    if (balance === null) return sendError(res, { message: "Gagal mengambil saldo dari provider" });
+
+    const updated = await prisma.aiModel.update({
+      where: { id },
+      data: { last_maia_balance: balance, last_sync_at: new Date() }
+    });
+
+    return success(res, { 
+      message: `Sinkronisasi Berhasil! Max Budget ${model.namaRouter} disesuaikan ke $${balance}`,
+      data: updated 
     });
   } catch (error) {
     next(error);

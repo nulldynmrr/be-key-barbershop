@@ -4,28 +4,28 @@ const {
   updatePackageSchema,
 } = require("../validations/package.validation");
 const cache = require("../utils/memoryCache");
+const { success, error: sendError } = require("../utils/response.helper");
 
 const getLiveHPP = async (req, res, next) => {
   try {
     const result = await packageService.calculateLiveHPP(req.body);
-    res.status(200).json({ success: true, data: result });
+    return success(res, { data: result });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
 const getActivePackages = async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const result = await packageService.getAllPackages(page, limit);
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: result,
       meta: { page, limit, total: result.total },
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -36,14 +36,16 @@ const createPackage = async (req, res, next) => {
     cache.clear();
     if (req.log)
       req.log.info({ packageId: data.id }, "Paket baru sukses dibuat");
-    res
-      .status(201)
-      .json({ success: true, message: "Paket aman dan berhasil dibuat", data });
+    return success(res, { 
+      statusCode: 201,
+      message: "Paket aman dan berhasil dibuat", 
+      data 
+    });
   } catch (error) {
     if (error.name === "ZodError") {
-      return res.status(400).json({ success: false, errors: error.errors });
+      return sendError(res, { statusCode: 400, errors: error.errors.map(e => e.message) });
     }
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -57,16 +59,15 @@ const updatePackage = async (req, res, next) => {
     );
     cache.clear();
     if (req.log) req.log.info({ packageId: id }, "Paket sukses diupdate");
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Paket berhasil diupdate",
       data: updatedData,
     });
   } catch (error) {
     if (error.name === "ZodError") {
-      return res.status(400).json({ success: false, errors: error.errors });
+      return sendError(res, { statusCode: 400, errors: error.errors.map(e => e.message) });
     }
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -76,9 +77,9 @@ const deletePackage = async (req, res, next) => {
     await packageService.deletePackageById(id);
     cache.clear();
     if (req.log) req.log.info({ packageId: id }, "Paket sukses dihapus");
-    res.status(200).json({ success: true, message: "Paket berhasil dihapus" });
+    return success(res, { message: "Paket berhasil dihapus" });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -87,12 +88,11 @@ const togglePackageStatus = async (req, res, next) => {
     const { status } = req.body;
     await packageService.togglePackageStatus(req.params.id, status);
     cache.clear();
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: `Paket berhasil di-${status === "AKTIF" ? "aktifkan" : "nonaktifkan"}`,
     });
   } catch (error) {
-    next(error);
+    return sendError(res, { message: error.message });
   }
 };
 

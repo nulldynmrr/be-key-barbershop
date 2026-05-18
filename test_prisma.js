@@ -13,9 +13,9 @@ async function test() {
         status_langganan: true,
         tgl_berakhir_langganan: true,
         createdAt: true,
-        subscriptionpackage: {
+        active_package: {
           select: {
-            nama_paket: true
+            namaPaket: true
           }
         }
       }

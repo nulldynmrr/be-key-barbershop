@@ -13,6 +13,9 @@ const {
   getFeatureToggleMap,
   updateFeaturePrice,
   calculateIdealKoin,
+  getAiModelBalance,
+  syncModelBalance,
+  parseCurl,
 } = require("../controllers/aiconfig.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
 
@@ -200,6 +203,8 @@ router.delete("/models/:id", deleteAiModel);
  *         description: Status diupdate
  */
 router.patch("/models/:id/status", toggleModelStatus);
+router.get("/models/:id/balance", getAiModelBalance);
+router.post("/models/:id/sync-balance", syncModelBalance);
 
 /**
  * @swagger
@@ -342,5 +347,6 @@ router.put("/feature-pricing/:id", updateFeaturePrice);
  *         description: Hasil estimasi koin ideal per 1 generate
  */
 router.post("/calculate-ideal-koin", calculateIdealKoin);
+router.post("/parse-curl", parseCurl);
 
 module.exports = router;

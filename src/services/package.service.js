@@ -51,6 +51,34 @@ const SUBSCRIPTION_PACKAGE_PRISMA_KEYS = new Set([
   "diskonAkhir",
 ]);
 
+/**
+ * Promo dianggap aktif hanya jika rentang tanggal valid — selaras dengan `getAllPackages` (harga_bayar).
+ * @param {object} pkg — baris SubscriptionPackage dari Prisma
+ * @param {Date} [at]
+ * @returns {boolean}
+ */
+function isPackagePromoActiveAt(pkg, at = new Date()) {
+  if (!pkg?.promoAktif || pkg.hargaDiskon == null || !pkg.diskonMulai || !pkg.diskonAkhir) {
+    return false;
+  }
+  const t0 = new Date(pkg.diskonMulai);
+  const t1 = new Date(pkg.diskonAkhir);
+  return at >= t0 && at <= t1;
+}
+
+/**
+ * Harga IDR yang dibayar pembeli (harga diskon jika promo aktif, selain itu harga nominal).
+ * Dipakai saat mencatat `Transaction.nominal` agar dashboard pendapatan = uang masuk nyata.
+ * @param {object} pkg
+ * @param {Date} [at]
+ * @returns {number}
+ */
+function getEffectivePackagePriceIdr(pkg, at = new Date()) {
+  if (!pkg) return 0;
+  if (isPackagePromoActiveAt(pkg, at)) return Math.round(Number(pkg.hargaDiskon));
+  return Math.round(Number(pkg.hargaNominal) || 0);
+}
+
 // Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
   const {
@@ -95,11 +123,20 @@ const calculateLiveHPP = async (payload) => {
   // === 2. HITUNG COST IMAGE GEN (Jika Aktif) ===
   if (featVirtualTryOn && selectedImage) {
     const limit = virtualTryOnLimit > 0 ? virtualTryOnLimit : 1;
-    costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0) * limit;
-    
-    let imageTokenCost = (Number(selectedImage.hargaInput1M) || 0) / 1_000_000;
-    let imageTokens = selectedImage.avgTokensPerUse || 0;
-    costPerActionUsd += (imageTokens * imageTokenCost) * limit;
+    const unit = String(selectedImage.pricingUnit || "TOKEN").toUpperCase();
+
+    if (unit === "IMAGE") {
+      costPerActionUsd += (Number(selectedImage.hargaPerImage) || 0) * limit;
+      const imgTok = Number(selectedImage.avgTokensPerUse) || 0;
+      const in1m = Number(selectedImage.hargaInput1M) || 0;
+      if (imgTok > 0 && in1m > 0) {
+        costPerActionUsd += (imgTok / 1_000_000) * in1m * limit;
+      }
+    } else {
+      const imgCostPerToken =
+        ((Number(selectedImage.hargaInput1M) || 0) + (Number(selectedImage.hargaOutput1M) || 0)) / 2 / 1_000_000;
+      costPerActionUsd += (Number(selectedImage.avgTokensPerUse) || 2000) * imgCostPerToken * limit;
+    }
   }
 
   let costPerActionIdr = costPerActionUsd * effectiveRate;
@@ -186,13 +223,7 @@ const getAllPackages = async (page = 1, limit = 10) => {
   const now = new Date();
 
   const formattedPackages = packages.map((pkg) => {
-    const isPromoValid =
-      pkg.promoAktif &&
-      pkg.hargaDiskon &&
-      pkg.diskonMulai &&
-      pkg.diskonAkhir &&
-      now >= new Date(pkg.diskonMulai) &&
-      now <= new Date(pkg.diskonAkhir);
+    const isPromoValid = isPackagePromoActiveAt(pkg, now);
 
     let durasi_display = "Selamanya";
     if (pkg.durationDays) {
@@ -402,5 +433,7 @@ module.exports = {
   createNewPackage,
   updatePackageById,
   deletePackageById,
-  togglePackageStatus
+  togglePackageStatus,
+  isPackagePromoActiveAt,
+  getEffectivePackagePriceIdr,
 };

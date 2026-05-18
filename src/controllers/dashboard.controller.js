@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getDashboardMain = async (req, res) => {
   try {
@@ -182,7 +183,7 @@ exports.getDashboardMain = async (req, res) => {
     }));
 
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
     const skip = (page - 1) * limit;
 
     // Menampilkan UNIQUE USER yang melakukan generate terbaru
@@ -247,8 +248,7 @@ exports.getDashboardMain = async (req, res) => {
       });
     }
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data: {
         trendLabel,
         summaryCards: {
@@ -272,7 +272,7 @@ exports.getDashboardMain = async (req, res) => {
               pastPengeluaranIdr,
             ),
             trendDirection:
-              currentPengeluaranIdr >= pastPengeluaranIdr ? "up" : "down",
+              currentPengeluaranIdr >= pastPendapatanIdr ? "up" : "down",
             trendLabel,
           },
           sisaToken: {
@@ -296,6 +296,6 @@ exports.getDashboardMain = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

@@ -1,14 +1,14 @@
 const fs = require("fs");
 const path = require("path");
-
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getAllServices = async (req, res) => {
   try {
     const services = await prisma.service.findMany();
-    res.status(200).json({ success: true, data: services });
+    return success(res, { data: services });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -25,15 +25,13 @@ exports.createService = async (req, res) => {
     }
 
     const newService = await prisma.service.create({ data });
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "Layanan ditambahkan",
-        data: newService,
-      });
+    return success(res, {
+      statusCode: 201,
+      message: "Layanan ditambahkan",
+      data: newService,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -64,11 +62,9 @@ exports.updateService = async (req, res) => {
       data: dataUpdate,
     });
 
-    res
-      .status(200)
-      .json({ success: true, message: "Layanan diupdate", data: updated });
+    return success(res, { message: "Layanan diupdate", data: updated });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -86,10 +82,8 @@ exports.deleteService = async (req, res) => {
     }
 
     await prisma.service.delete({ where: { id: Number(id) } });
-    res
-      .status(200)
-      .json({ success: true, message: "Layanan dihapus permanen" });
+    return success(res, { message: "Layanan dihapus permanen" });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

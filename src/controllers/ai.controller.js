@@ -1,26 +1,13 @@
 const { faceAnalysisSchema } = require("../validations/ai.validation");
 const aiService = require("../services/ai");
-const cache = require("../utils/memoryCache");
-
 const prisma = require("../config/prisma");
-
-const FEATURE_GATE_MAP = {
-  STANDARD_SCAN:        "featStandardScan",
-  FACE_HEATMAP:         "featFaceHeatmap",
-  SYMMETRY:             "featSymmetry",
-  ADV_MAPPING:          "featAdvMapping",
-  HAIR_ANALYSIS:        "featHairAnalysis",
-  RISK_ANALYSIS:        "featRiskAnalysis",
-  BARBER_INSTRUCTIONS:  "featBarberInstructions",
-  VIRTUAL_TRY_ON:       "featVirtualTryOn",
-  HISTORY:              "featHistory",
-  TREND_ANALYSIS:       "featTrendAnalysis",
-};
+const { FEATURE_GATE_MAP } = require("../services/ai/featureGateMap");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.analyzeFace = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: "Harap unggah foto wajah." });
+      return sendError(res, { statusCode: 400, message: "Harap unggah foto wajah." });
     }
 
     let parsedFeatures = req.body.requestedFeatures;
@@ -34,23 +21,47 @@ exports.analyzeFace = async (req, res) => {
 
     const validation = faceAnalysisSchema.safeParse({ requestedFeatures: parsedFeatures });
     if (!validation.success) {
-      return res.status(400).json({
-        success: false,
+      return sendError(res, {
+        statusCode: 400,
         errors: validation.error.errors.map((e) => e.message),
       });
     }
 
+    // Set headers untuk streaming agar frontend bisa baca progress secara real-time
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const onStatusUpdate = (nodeName) => {
+      res.write(JSON.stringify({ type: 'status', node: nodeName }) + '\n');
+    };
+
     const result = await aiService.processFaceAnalysis(
       req.user.id,
       req.file,
-      validation.data.requestedFeatures
+      validation.data.requestedFeatures,
+      req.body.source,
+      onStatusUpdate
     );
 
-    res.status(200).json({
-      success: true,
+    // Check photo violation penalty
+    if (result.photo_violation_detected) {
+      const errorPayload = {
+        type: 'error',
+        statusCode: 400,
+        errorCode: "PHOTO_VIOLATION",
+        message: result.violation_reason || "Kualitas foto tidak memadai! Koin dipotong 1.",
+        credit_after: result.sisa_credit_after
+      };
+      res.write(JSON.stringify(errorPayload) + '\n');
+      return res.end();
+    }
+
+    // Kirim hasil akhir
+    res.write(JSON.stringify({ 
+      type: 'final',
       message: result.kualitas_ok
-        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong (Service: ${result.totalKoinFitur}, AI Token: ${result.realKoinAi}${result.imageGenKoin ? `, Image Gen: ${result.imageGenKoin}` : ''}).`
-        : `Kualitas foto kurang baik: ${result.alasan}. Total ${result.totalDipotong} koin tetap terpotong.`,
+        ? `Analisis berhasil. Total ${result.totalDipotong} koin terpotong.`
+        : `Kualitas foto kurang baik: ${result.alasan}.`,
       data: {
         record: result.resultTx || {
           url_foto_upload: result.url_foto_upload,
@@ -65,15 +76,27 @@ exports.analyzeFace = async (req, res) => {
         service_fee: result.totalKoinFitur,
         token_fee: result.realKoinAi,
         image_gen_fee: result.imageGenKoin || 0,
-      },
-    });
+        credit_before: result.sisa_credit_before,
+        credit_after: result.sisa_credit_after,
+      }
+    }) + '\n');
+    
+    return res.end();
   } catch (error) {
-    console.error("AI Controller Error:", error.message);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      errorCode: error.errorCode || "GENERIC_ERROR",
+    // Jika error terjadi saat streaming sudah dimulai, kirim error dalam format JSON chunk
+    const errorPayload = {
+      type: 'error',
+      statusCode: error.statusCode || 500,
+      errorCode: error.errorCode || "AI_PROCESSING_ERROR",
       message: error.message || "Gagal memproses AI.",
-    });
+    };
+
+    if (res.headersSent) {
+      res.write(JSON.stringify(errorPayload) + '\n');
+      return res.end();
+    }
+
+    return sendError(res, errorPayload);
   }
 };
 
@@ -82,31 +105,50 @@ exports.getAvailableFeatures = async (req, res) => {
     const userId = req.user?.id;
     const pricingList = await prisma.featurePricing.findMany({ orderBy: { featureCode: "asc" } });
 
-    let userPackage = null;
+    let userPackages = [];
     if (userId) {
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        include: { active_package: true },
+      const balances = await prisma.userPackageBalance.findMany({
+        where: { 
+          user_id: userId,
+          coins_remaining: { gt: 0 }
+        },
+        include: { package: true },
       });
-      userPackage = user?.active_package || null;
+      userPackages = balances.map(b => b.package).filter(Boolean);
     }
 
     const features = {};
     for (const fp of pricingList) {
       const col = FEATURE_GATE_MAP[fp.featureCode];
       const globallyActive = fp.isActive;
-      const inPackage = userPackage ? !!userPackage[col] : false;
+      
+      // Feature is in package if ANY of the user's packages has it set to true
+      const inPackage = userPackages.some(pkg => !!pkg[col]);
+      
+      // Handle Free Trial logic for availability display
+      let available = globallyActive && inPackage;
+      
+      if (!inPackage && req.user?.tipe_akun === "free" && (req.user?.sisa_credit || 0) > 0) {
+        if (fp.featureCode === "STANDARD_SCAN" || fp.featureCode === "HISTORY") {
+          available = globallyActive;
+        }
+      }
+      
       features[fp.featureCode] = {
         namaFitur: fp.namaFitur,
         koinCost: fp.koinCost,
         globallyActive,
         inPackage,
-        available: globallyActive && inPackage,
+        available,
       };
     }
 
-    res.status(200).json({ success: true, data: features });
+    return success(res, { data: features });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, {
+      statusCode: 500,
+      message: "Gagal memuat daftar fitur.",
+    });
   }
 };
+

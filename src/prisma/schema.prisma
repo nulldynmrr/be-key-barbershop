@@ -42,6 +42,7 @@ model User {
 
   active_package_id      String?
   active_package         SubscriptionPackage? @relation(fields: [active_package_id], references: [id])
+  package_balances       UserPackageBalance[]
   audit_logs             AuditLog[]
 }
 
@@ -73,13 +74,18 @@ model Transaction {
 model AIGeneration {
   id                    String         @id @default(uuid())
   user_id               String
-  url_foto_upload       String
+  image_hash            String?        @db.VarChar(64)
+  feature_fingerprint   String?        @db.VarChar(64)
+  url_foto_upload       String         @db.Text
   url_hasil_img         Json?
   hasil_analisis        Json
+  features_used         String?        @db.Text
   harga_credit_terpakai Int
   tgl_generate          DateTime       @default(now())
   user                  User           @relation(fields: [user_id], references: [id])
   system_api_logs       SystemApiLog[]
+
+  @@index([user_id, image_hash, feature_fingerprint])
 }
 
 model SystemApiLog {
@@ -95,6 +101,12 @@ model SystemApiLog {
   service_fee_koin  Int     @default(0)
   token_fee_koin    Int     @default(0)
   features_used     String? @db.Text
+
+  membership_snapshot String?
+  charge_usd          Decimal @default(0) @db.Decimal(10, 6)
+
+  attempt_count       Int     @default(1)
+  success_count       Int     @default(1)
 
   user_id          String?
   ai_generation_id String?
@@ -150,6 +162,9 @@ model AiModel {
   rpmLimit        Int
   avgTokensPerUse Int     @default(2000)
   isActive        Boolean @default(true)
+
+  last_maia_balance Decimal? @db.Decimal(10, 6)
+  last_sync_at      DateTime?
 
   packagesAsLlm   SubscriptionPackage[] @relation("LlmModel")
   packagesAsImage SubscriptionPackage[] @relation("ImageModel")
@@ -233,7 +248,24 @@ model SubscriptionPackage {
 
   status String @default("AKTIF")
 
-  users User[]
+  users    User[]
+  balances UserPackageBalance[]
+}
+
+model UserPackageBalance {
+  id              String              @id @default(uuid())
+  user_id         String
+  package_id      String
+  coins_purchased Int
+  coins_remaining Int
+  purchased_at    DateTime            @default(now())
+  updated_at      DateTime            @updatedAt
+
+  user    User                @relation(fields: [user_id], references: [id])
+  package SubscriptionPackage @relation(fields: [package_id], references: [id])
+
+  @@unique([user_id, package_id])
+  @@map("user_package_balances")
 }
 
 model FeaturePricing {

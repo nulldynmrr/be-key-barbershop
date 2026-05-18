@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const { success, error: sendError } = require("../utils/response.helper");
 
 exports.getAdminAlerts = async (req, res) => {
   try {
@@ -10,38 +11,63 @@ exports.getAdminAlerts = async (req, res) => {
 
     for (const model of aiModels) {
       if (model.maxBudget > 0) {
-        const usage = await prisma.systemApiLog.aggregate({
+        const deltaUsage = await prisma.systemApiLog.aggregate({
           _sum: { cost_usd: true },
-          where: { model_name: model.modelName },
+          where: {
+            model_name: model.modelName,
+            tgl_penggunaan: model.last_sync_at ? { gte: model.last_sync_at } : undefined,
+          },
         });
 
-        const totalUsedUsd = Number(usage._sum.cost_usd || 0);
-        const remainingPercentage =
-          ((model.maxBudget - totalUsedUsd) / model.maxBudget) * 100;
+        const deltaUsed    = Number(deltaUsage._sum.cost_usd || 0);
+        const baseBalance  = model.last_maia_balance ?? model.maxBudget;
+        const remainingUsd = Math.max(0, Number(baseBalance) - deltaUsed);
+        const usedTotal    = Number(model.maxBudget) - remainingUsd;
+        const remainingPct = (remainingUsd / Number(model.maxBudget)) * 100;
 
-        if (remainingPercentage <= 10) {
+        // Threshold dinaikkan: warning 20%, critical 5%
+        if (remainingPct <= 20) {
           alerts.push({
-            type: "CRITICAL",
+            type: remainingPct <= 5 ? "CRITICAL" : "WARNING",
             source: "AI_BUDGET",
-            message: `URGENT: Sisa limit tagihan model API ${model.modelName} tinggal ${remainingPercentage.toFixed(2)}% ($${(model.maxBudget - totalUsedUsd).toFixed(4)} tersisa). Segera isi saldo Provider AI.`,
+            model: model.namaRouter,
+            usedUsd: usedTotal.toFixed(4),
+            remainingUsd: remainingUsd.toFixed(4),
+            remainingPct: remainingPct.toFixed(2),
             action_required: true,
+            staleSyncWarning: model.last_sync_at
+              ? (Date.now() - new Date(model.last_sync_at).getTime()) > 7 * 24 * 60 * 60 * 1000
+                ? "⚠️ Saldo MAIA belum disync lebih dari 7 hari — kemungkinan ada selisih"
+                : null
+              : "⚠️ Saldo MAIA belum pernah disync",
+            message: `${model.namaRouter}: estimasi sisa $${remainingUsd.toFixed(4)} (${remainingPct.toFixed(1)}%).`,
           });
+        }
+
+        // Alert terpisah bila sync sudah > 7 hari
+        if (model.last_sync_at) {
+          const daysSinceSync =
+            (Date.now() - new Date(model.last_sync_at).getTime()) / (1000 * 60 * 60 * 24);
+          if (daysSinceSync > 7) {
+            alerts.push({
+              type: "INFO",
+              source: "AI_BUDGET_SYNC",
+              model: model.namaRouter,
+              message: `Saldo MAIA untuk ${model.namaRouter} belum disync ${Math.floor(daysSinceSync)} hari. Buka dashboard MAIA dan update last_maia_balance.`,
+              action_required: false,
+            });
+          }
         }
       }
     }
 
-    res.status(200).json({
-      success: true,
-      total_alerts: alerts.length,
+    return success(res, {
       data: alerts,
+      meta: { total_alerts: alerts.length }
     });
   } catch (error) {
     console.error("Notification Error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Gagal memuat notifikasi",
-      error: error.message,
-    });
+    return sendError(res, { message: "Gagal memuat notifikasi" });
   }
 };
 
@@ -59,17 +85,12 @@ exports.getAllNotifications = async (req, res) => {
       })
     ]);
 
-    res.status(200).json({
-      success: true,
-      unreadCount,
+    return success(res, {
       data: notifications,
+      meta: { unreadCount }
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Gagal mengambil notifikasi",
-      error: error.message,
-    });
+    return sendError(res, { message: "Gagal mengambil notifikasi" });
   }
 };
 
@@ -81,13 +102,12 @@ exports.markAsRead = async (req, res) => {
       data: { is_read: true },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Notifikasi dibaca",
       data: notification,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -98,11 +118,10 @@ exports.markAllAsRead = async (req, res) => {
       data: { is_read: true },
     });
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       message: "Semua notifikasi telah ditandai dibaca",
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };

@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const axios = require("axios");
+const { success, error: sendError } = require("../utils/response.helper");
 
 /**
  * POST /api/v1/waitlist
@@ -67,14 +68,13 @@ exports.submitWaitlist = async (req, res) => {
       });
     }
 
-    res.status(201).json({
-      success: true,
+    return success(res, {
+      statusCode: 201,
       message: "Pesan Anda berhasil terkirim. Barber kami akan segera menghubungi Anda.",
       data: { id: entry.id },
     });
   } catch (error) {
-    console.error("Waitlist Error:", error.message);
-    res.status(500).json({ success: false, message: "Gagal mengirim pesan. Silakan coba lagi." });
+    return sendError(res, { message: "Gagal mengirim pesan. Silakan coba lagi." });
   }
 };
 
@@ -85,7 +85,7 @@ exports.submitWaitlist = async (req, res) => {
 exports.getWaitlist = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const skip = (page - 1) * limit;
 
     const [total, data] = await Promise.all([
@@ -97,13 +97,12 @@ exports.getWaitlist = async (req, res) => {
       }),
     ]);
 
-    res.status(200).json({
-      success: true,
+    return success(res, {
       data,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -117,9 +116,9 @@ exports.markHandled = async (req, res) => {
       where: { id: req.params.id },
       data: { is_handled: true },
     });
-    res.status(200).json({ success: true, message: "Antrian ditandai sudah ditangani." });
+    return success(res, { message: "Antrian ditandai sudah ditangani." });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -132,9 +131,9 @@ exports.deleteWaitlist = async (req, res) => {
     await prisma.waitlist.delete({
       where: { id: req.params.id },
     });
-    res.status(200).json({ success: true, message: "Data berhasil dihapus." });
+    return success(res, { message: "Data berhasil dihapus." });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 /**
@@ -145,7 +144,7 @@ exports.checkStatus = async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
-      return res.status(200).json({ success: true, hasPending: false });
+      return success(res, { data: { hasPending: false } });
     }
 
     const pending = await prisma.waitlist.findFirst({
@@ -155,12 +154,11 @@ exports.checkStatus = async (req, res) => {
       },
     });
 
-    res.status(200).json({
-      success: true,
-      hasPending: !!pending,
+    return success(res, {
+      data: { hasPending: !!pending },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
 
@@ -174,11 +172,10 @@ exports.getUnhandledCount = async (req, res) => {
       where: { is_handled: false },
     });
 
-    res.status(200).json({
-      success: true,
-      count,
+    return success(res, {
+      data: { count },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    return sendError(res, { message: error.message });
   }
 };
