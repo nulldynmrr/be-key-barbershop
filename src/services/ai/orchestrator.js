@@ -92,6 +92,8 @@ const processFaceAnalysis = async (userId, file, requestedFeatures, source = "fi
       : null,
     sisa_credit_before: finalState.sisa_credit_before,
     sisa_credit_after: finalState.sisa_credit_after,
+    photo_violation_detected: finalState.photo_violation_detected,
+    violation_reason: finalState.violation_reason,
   };
 };
 

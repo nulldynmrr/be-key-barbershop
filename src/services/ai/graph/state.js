@@ -143,6 +143,14 @@ const FaceAnalysisStateAnnotation = Annotation.Root({
     value: (_, newVal) => newVal,
     default: () => null,
   }),
+  photo_violation_detected: Annotation({
+    value: (_, newVal) => newVal,
+    default: () => false,
+  }),
+  violation_reason: Annotation({
+    value: (_, newVal) => newVal,
+    default: () => null,
+  }),
 });
 
 module.exports = { FaceAnalysisStateAnnotation };

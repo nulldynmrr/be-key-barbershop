@@ -29,7 +29,11 @@ const dbTransactionNode = async (state) => {
   const igCost = imageGenCostUsd ?? 0;
   const igKoin = imageGenKoin ?? 0;
   const rawTotal = (billingBase?.totalKoinFitur || 0) + (realBilling?.realKoinAi || 0) + igKoin;
-  const finalTotalDipotong = Math.max(2, rawTotal);
+  let finalTotalDipotong = Math.max(2, rawTotal);
+
+  if (state.photo_violation_detected) {
+    finalTotalDipotong = 1;
+  }
   const igUsage = normalizeOpenAiCompatibleUsage(imageGenUsage);
   const usage = normalizeOpenAiCompatibleUsage(llmUsage);
 
@@ -52,7 +56,7 @@ const dbTransactionNode = async (state) => {
     const calcChargeUsd = (cost) => isFreeTrial ? 0 : (Number(cost) * multiplier);
 
     // Hanya CREATE — tidak menghapus/update history lama; daftar history user menumpuk selamanya.
-    if (saveToHistory) {
+    if (saveToHistory && !state.photo_violation_detected) {
       aiRecord = await tx.aIGeneration.create({
         data: {
           user_id: userId,
@@ -67,6 +71,15 @@ const dbTransactionNode = async (state) => {
       });
     }
 
+    let finalKoinCharged = billingBase.totalKoinFitur + realBilling.realKoinAi;
+    let finalChargeUsd = calcChargeUsd(realBilling.realCostUsd);
+
+    if (state.photo_violation_detected) {
+      finalKoinCharged = 1;
+      const hargaPerKoinUsd = billingBase.hargaPerKoinIdr / (billingBase.rateIdr || 16000);
+      finalChargeUsd = isFreeTrial ? 0 : (finalKoinCharged * hargaPerKoinUsd);
+    }
+
     await tx.systemApiLog.create({
       data: {
         model_name: configAi.modelName,
@@ -74,14 +87,14 @@ const dbTransactionNode = async (state) => {
         output_tokens: usage.completion_tokens || 0,
         total_tokens: usage.total_tokens || 0,
         cost_usd: realBilling.realCostUsd,
-        koin_charged: billingBase.totalKoinFitur + realBilling.realKoinAi,
-        service_fee_koin: billingBase.totalKoinFitur,
-        token_fee_koin: realBilling.realKoinAi,
+        koin_charged: finalKoinCharged,
+        service_fee_koin: state.photo_violation_detected ? 1 : billingBase.totalKoinFitur,
+        token_fee_koin: state.photo_violation_detected ? 0 : realBilling.realKoinAi,
         features_used: JSON.stringify(activeFeatures),
         user_id: userId,
         ai_generation_id: aiRecord?.id || null,
         membership_snapshot: membershipName,
-        charge_usd: calcChargeUsd(realBilling.realCostUsd),
+        charge_usd: finalChargeUsd,
       },
     });
 
@@ -185,6 +198,8 @@ const dbTransactionNode = async (state) => {
     resultTx: resultTx.aiRecord,
     sisa_credit_after: resultTx.sisa_credit_after,
     totalDipotong: resultTx.totalDipotong,
+    photo_violation_detected: state.photo_violation_detected,
+    violation_reason: state.violation_reason,
   };
 };
 

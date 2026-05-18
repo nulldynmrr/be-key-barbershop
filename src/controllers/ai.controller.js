@@ -43,6 +43,19 @@ exports.analyzeFace = async (req, res) => {
       onStatusUpdate
     );
 
+    // Check photo violation penalty
+    if (result.photo_violation_detected) {
+      const errorPayload = {
+        type: 'error',
+        statusCode: 400,
+        errorCode: "PHOTO_VIOLATION",
+        message: result.violation_reason || "Kualitas foto tidak memadai! Koin dipotong 1.",
+        credit_after: result.sisa_credit_after
+      };
+      res.write(JSON.stringify(errorPayload) + '\n');
+      return res.end();
+    }
+
     // Kirim hasil akhir
     res.write(JSON.stringify({ 
       type: 'final',

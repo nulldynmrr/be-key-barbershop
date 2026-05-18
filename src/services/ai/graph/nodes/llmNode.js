@@ -74,6 +74,22 @@ const llmNode = async (state) => {
   
   const realBilling = calculateRealBilling(llmUsage, configAi, billingBase, billingBase.totalKoinFitur);
 
+  let photo_violation_detected = false;
+  let violation_reason = null;
+
+  if (hasil_analisis?.jumlah_wajah > 1) {
+    photo_violation_detected = true;
+    violation_reason = "Fotonya hanya satu orang saja! Koin dipotong 1.";
+  } else if (hasil_analisis?.jumlah_wajah === 0) {
+    photo_violation_detected = true;
+    violation_reason = "Wajah tidak terdeteksi secara jelas! Koin dipotong 1.";
+  } else if (hasil_analisis?.kualitas_foto_ok === false) {
+    photo_violation_detected = true;
+    violation_reason = hasil_analisis.alasan_kualitas 
+      ? `${hasil_analisis.alasan_kualitas} Koin dipotong 1.` 
+      : "Kualitas foto tidak memadai! Koin dipotong 1.";
+  }
+
   return {
     hasil_analisis,
     llmUsage,
@@ -81,6 +97,8 @@ const llmNode = async (state) => {
     totalDipotong: realBilling.totalDipotong,
     imageFingerprint,
     featureFingerprint,
+    photo_violation_detected,
+    violation_reason,
   };
 };
 
