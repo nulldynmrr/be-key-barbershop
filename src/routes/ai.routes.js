@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const { analyzeFace, getAvailableFeatures } = require("../controllers/ai.controller");
+const { analyzeFace, getAvailableFeatures, generateTryOn } = require("../controllers/ai.controller");
 const { verifyToken } = require("../middleware/auth.middleware");
 const optimizeImage = require("../middleware/imageOptimizer.middleware");
 const { aiLimiter, distributedDedupe } = require("../middleware/security.middleware");
@@ -72,5 +72,7 @@ router.post(
   distributedDedupe(10), // 10s lock per user/route
   analyzeFace
 );
+
+router.post("/generate-tryon", verifyToken, generateTryOn);
 
 module.exports = router;

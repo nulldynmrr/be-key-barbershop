@@ -6,8 +6,8 @@ const routeAfterLLM = (state) => {
     return "dbTransactionNode";
   }
 
-  const needsImageGen =
-    state.activeFeatures?.includes("VIRTUAL_TRY_ON") && state.configImageGen != null;
+  // Defer image generation to the /result page per client requirements (handled on demand)
+  const needsImageGen = false;
 
   if (process.env.DEBUG_AI_GRAPH === "1") {
     console.log(

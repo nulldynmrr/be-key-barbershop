@@ -14,3 +14,5 @@ app.listen(PORT, () => {
     `📁 Akses gambar lokal aktif di http://localhost:${PORT}/uploads`,
   );
 });
+
+// Database server started

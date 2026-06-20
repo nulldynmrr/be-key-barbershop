@@ -7,7 +7,10 @@ const hpp = require("hpp");
 const pino = require("pino-http")();
 const routes = require("./routes");
 const { errorHandler } = require("./middleware/errorHandler.middleware");
-const { requestId, globalLimiter } = require("./middleware/security.middleware");
+const {
+  requestId,
+  globalLimiter,
+} = require("./middleware/security.middleware");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpec = require("./config/swagger");
 
@@ -15,9 +18,11 @@ const app = express();
 app.set("trust proxy", 1);
 
 // 1. Security Headers & Protection
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  }),
+);
 app.use(hpp());
 app.use(compression());
 
@@ -26,12 +31,18 @@ app.use(requestId);
 app.use(pino);
 
 // 3. CORS & Parsing
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
-  exposedHeaders: ["X-Request-Id"]
-}));
+app.use(
+  cors({
+    origin: process.env.ALLOWED_ORIGINS
+      ? process.env.ALLOWED_ORIGINS.split(",")
+      : ["http://localhost:3000", "http://localhost:3001"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
+    exposedHeaders: ["X-Request-Id"],
+    credentials: true,
+    maxAge: 86400,
+  }),
+);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
