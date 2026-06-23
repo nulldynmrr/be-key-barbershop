@@ -9,6 +9,7 @@ const {
   getAdminProfile,
   getAuditLogs,
   requestAdminOTP,
+  getTransactions,
 } = require("../controllers/admin.controller");
 const { resolveUserEmail } = require("../controllers/user.controller");
 const { verifyToken, isAdmin } = require("../middleware/auth.middleware");
@@ -212,6 +213,7 @@ router.post("/request-otp", requestAdminOTP);
  *         description: Berhasil mengambil log aktivitas
  */
 router.get("/audit-logs", getAuditLogs);
+router.get("/transactions", getTransactions);
 
 
 module.exports = router;
