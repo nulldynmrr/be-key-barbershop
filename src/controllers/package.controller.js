@@ -43,7 +43,7 @@ const createPackage = async (req, res, next) => {
     });
   } catch (error) {
     if (error.name === "ZodError") {
-      return sendError(res, { statusCode: 400, errors: error.errors.map(e => e.message) });
+      return sendError(res, { statusCode: 400, errors: error.issues.map(e => e.message) });
     }
     return sendError(res, { message: error.message });
   }
@@ -65,7 +65,7 @@ const updatePackage = async (req, res, next) => {
     });
   } catch (error) {
     if (error.name === "ZodError") {
-      return sendError(res, { statusCode: 400, errors: error.errors.map(e => e.message) });
+      return sendError(res, { statusCode: 400, errors: error.issues.map(e => e.message) });
     }
     return sendError(res, { message: error.message });
   }

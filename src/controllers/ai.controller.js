@@ -23,7 +23,7 @@ exports.analyzeFace = async (req, res) => {
     if (!validation.success) {
       return sendError(res, {
         statusCode: 400,
-        errors: validation.error.errors.map((e) => e.message),
+        errors: validation.error.issues.map((e) => e.message),
       });
     }
 
