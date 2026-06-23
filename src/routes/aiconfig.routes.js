@@ -10,6 +10,7 @@ const {
   toggleModelStatus,
   testConnection,
   getFeaturePricing,
+  createFeaturePricing,
   getFeatureToggleMap,
   updateFeaturePrice,
   calculateIdealKoin,
@@ -269,6 +270,39 @@ router.get("/logs", getAiUsageLogs);
  *         description: Berhasil mengambil data pricing
  */
 router.get("/feature-pricing", getFeaturePricing);
+
+/**
+ * @swagger
+ * /v1/ai-config/feature-pricing:
+ *   post:
+ *     summary: Buat baris harga koin baru untuk sebuah fitur (featureCode harus dikenal FEATURE_GATE_MAP)
+ *     tags: [AI Engine Control]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [featureCode, namaFitur, koinCost]
+ *             properties:
+ *               featureCode:
+ *                 type: string
+ *                 example: TREND_ANALYSIS
+ *               namaFitur:
+ *                 type: string
+ *                 example: Trend Analysis
+ *               koinCost:
+ *                 type: integer
+ *                 example: 5
+ *     responses:
+ *       201:
+ *         description: Berhasil membuat feature pricing
+ *       400:
+ *         description: Validasi gagal / featureCode tidak dikenal / sudah ada
+ */
+router.post("/feature-pricing", createFeaturePricing);
 
 /**
  * @swagger

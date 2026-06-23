@@ -6,6 +6,7 @@ const cache = require("../utils/memoryCache");
 const prisma = require("../config/prisma");
 const { success, error: sendError } = require("../utils/response.helper");
 const { resolveBalanceUrl } = require("../services/ai/core/openAiUrl");
+const { FEATURE_GATE_MAP } = require("../services/ai/featureGateMap");
 
 // Helper to fetch real balance from AI Provider (MAIA/OpenRouter)
 const fetchModelBalance = async (model) => {
@@ -431,6 +432,58 @@ exports.getFeaturePricing = async (req, res) => {
     return success(res, { data: pricing });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.createFeaturePricing = async (req, res) => {
+  try {
+    const { featureCode, namaFitur, koinCost } = req.body;
+
+    if (!featureCode || typeof featureCode !== "string") {
+      return sendError(res, { message: "featureCode wajib diisi", statusCode: 400 });
+    }
+    if (!namaFitur || typeof namaFitur !== "string" || !namaFitur.trim()) {
+      return sendError(res, { message: "namaFitur wajib diisi", statusCode: 400 });
+    }
+    const parsedKoinCost = parseInt(koinCost, 10);
+    if (koinCost === undefined || koinCost === null || isNaN(parsedKoinCost) || parsedKoinCost < 0) {
+      return sendError(res, { message: "koinCost wajib diisi dan harus angka >= 0", statusCode: 400 });
+    }
+
+    const knownCodes = Object.keys(FEATURE_GATE_MAP);
+    if (!knownCodes.includes(featureCode)) {
+      return sendError(res, {
+        message: `featureCode '${featureCode}' tidak dikenal oleh billing engine. Kode valid: ${knownCodes.join(", ")}`,
+        statusCode: 400,
+      });
+    }
+
+    const existing = await prisma.featurePricing.findUnique({ where: { featureCode } });
+    if (existing) {
+      return sendError(res, { message: `FeaturePricing untuk '${featureCode}' sudah ada`, statusCode: 400 });
+    }
+
+    let created;
+    try {
+      created = await prisma.featurePricing.create({
+        data: { featureCode, namaFitur: namaFitur.trim(), koinCost: parsedKoinCost, isActive: true },
+      });
+    } catch (err) {
+      if (err.code === "P2002") {
+        return sendError(res, { message: `FeaturePricing untuk '${featureCode}' sudah ada`, statusCode: 400 });
+      }
+      throw err;
+    }
+
+    cache.delete("pricingList");
+
+    return success(res, {
+      statusCode: 201,
+      message: "Fitur pricing berhasil dibuat",
+      data: created,
+    });
+  } catch (error) {
+    return sendError(res, { message: error.message });
   }
 };
 
