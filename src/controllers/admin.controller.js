@@ -341,6 +341,58 @@ const getAuditLogs = async (req, res, next) => {
 };
 
 
+const getTransactions = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
+    const search = req.query.search || "";
+    const skip = (page - 1) * limit;
+
+    const whereClause = {
+      ...(search && {
+        OR: [
+          { invoice_number: { contains: search } },
+          { reference_id: { contains: search } },
+          { status: { contains: search } },
+          { user: { nama: { contains: search } } },
+          { user: { email: { contains: search } } }
+        ]
+      })
+    };
+
+    const [total, transactions] = await Promise.all([
+      prisma.transaction.count({ where: whereClause }),
+      prisma.transaction.findMany({
+        where: whereClause,
+        orderBy: { tgl_transaksi: "desc" },
+        skip,
+        take: limit,
+        include: {
+          user: {
+            select: {
+              nama: true,
+              email: true,
+            },
+          },
+          package: {
+            select: {
+              namaPaket: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return success(res, {
+      data: transactions,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    return sendError(res, { message: error.message });
+  }
+};
+
+
 module.exports = {
   getUsers,
   getUserDetail,
@@ -351,4 +403,5 @@ module.exports = {
   getAdminProfile,
   getAuditLogs,
   requestAdminOTP,
+  getTransactions,
 };

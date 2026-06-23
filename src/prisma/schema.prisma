@@ -70,6 +70,7 @@ model Transaction {
   invoice_number  String?  @unique
   reference_id    String?  @unique
   package_id      String?
+  payment_method  String?
   tgl_transaksi   DateTime @default(now())
   user            User     @relation(fields: [user_id], references: [id])
   package         SubscriptionPackage? @relation(fields: [package_id], references: [id])

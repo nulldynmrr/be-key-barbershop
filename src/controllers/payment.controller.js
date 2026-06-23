@@ -196,6 +196,7 @@ exports.createTransaction = async (req, res) => {
         status: "PENDING",
         invoice_number: invoiceNumber,
         package_id: package_id,
+        payment_method: req.body.doku_payment_method || "DOKU",
       },
     });
 
@@ -414,6 +415,7 @@ exports.buyPackage = async (req, res) => {
           jenis_transaksi: "BUY_PACKAGE",
           nominal: nominalDibayar,
           status: "SUCCESS",
+          payment_method: "MANUAL",
         },
       });
 
@@ -488,6 +490,7 @@ exports.paymentNotification = async (req, res) => {
           data: {
             status: "SUCCESS",
             reference_id: body?.transaction?.reference_id || body?.order?.order_id,
+            payment_method: body?.payment?.payment_channel || body?.payment?.payment_method || transaction.payment_method || "DOKU",
           },
         });
 
@@ -587,6 +590,7 @@ exports.paymentCallback = async (req, res) => {
           data: {
             status: "SUCCESS",
             reference_id: reference_id,
+            payment_method: req.body.payment_channel || req.body.payment_method || transaction.payment_method || "DOKU",
           },
         });
 
