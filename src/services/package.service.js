@@ -79,6 +79,70 @@ function getEffectivePackagePriceIdr(pkg, at = new Date()) {
   return Math.round(Number(pkg.hargaNominal) || 0);
 }
 
+/**
+ * Mengkredit saldo koin paket yang baru dibeli, lalu memutuskan apakah active_package_id
+ * perlu diaktifkan otomatis ke paket baru ini.
+ *
+ * Hanya auto-aktifkan paket baru jika active_package_id user SAAT INI (sebelum pembelian
+ * ini) null, ATAU saldo UserPackageBalance untuk paket aktif itu sudah habis (<= 0).
+ * Jika user masih punya paket aktif dengan saldo > 0, active_package_id TIDAK diubah —
+ * user pakai endpoint switchPackage (user.controller.js) untuk pindah manual.
+ *
+ * @param {object} tx - Prisma transaction client
+ * @param {string} userId
+ * @param {object} pkg - SubscriptionPackage yang baru dibeli (butuh .id, .jumlahKoin)
+ * @returns {Promise<object>} updatedUser (include: { active_package: true })
+ */
+async function creditPackagePurchase(tx, userId, pkg) {
+  await tx.userPackageBalance.upsert({
+    where: { user_id_package_id: { user_id: userId, package_id: pkg.id } },
+    update: {
+      coins_purchased: { increment: pkg.jumlahKoin },
+      coins_remaining: { increment: pkg.jumlahKoin },
+    },
+    create: {
+      user_id: userId,
+      package_id: pkg.id,
+      coins_purchased: pkg.jumlahKoin,
+      coins_remaining: pkg.jumlahKoin,
+    },
+  });
+
+  const [currentUser, allBalances] = await Promise.all([
+    tx.user.findUnique({ where: { id: userId }, select: { active_package_id: true } }),
+    tx.userPackageBalance.findMany({
+      where: { user_id: userId },
+      select: { package_id: true, coins_remaining: true },
+    }),
+  ]);
+
+  const totalCoins = allBalances.reduce((sum, b) => sum + b.coins_remaining, 0);
+
+  const currentActiveId = currentUser?.active_package_id ?? null;
+  let nextActiveId = currentActiveId;
+
+  if (!currentActiveId) {
+    nextActiveId = pkg.id;
+  } else {
+    const currentActiveBalance = allBalances.find((b) => b.package_id === currentActiveId);
+    const currentActiveRemaining = currentActiveBalance?.coins_remaining ?? 0;
+    if (currentActiveRemaining <= 0) {
+      nextActiveId = pkg.id;
+    }
+  }
+
+  return tx.user.update({
+    where: { id: userId },
+    data: {
+      sisa_credit: totalCoins,
+      active_package_id: nextActiveId,
+      status_langganan: true,
+      tipe_akun: "premium",
+    },
+    include: { active_package: true },
+  });
+}
+
 // Kalkulasi HPP ideal berdasarkan model AI yang dipilih Admin saat membuat paket
 const calculateLiveHPP = async (payload) => {
   const {
@@ -436,4 +500,5 @@ module.exports = {
   togglePackageStatus,
   isPackagePromoActiveAt,
   getEffectivePackagePriceIdr,
+  creditPackagePurchase,
 };
