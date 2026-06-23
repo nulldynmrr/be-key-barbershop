@@ -1,6 +1,6 @@
 const prisma = require("../config/prisma");
 const { success, error: sendError } = require("../utils/response.helper");
-const { getEffectivePackagePriceIdr } = require("../services/package.service");
+const { getEffectivePackagePriceIdr, creditPackagePurchase } = require("../services/package.service");
 const axios = require("axios");
 const crypto = require("crypto");
 
@@ -369,45 +369,7 @@ exports.buyPackage = async (req, res) => {
     const nominalDibayar = getEffectivePackagePriceIdr(pkg);
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.userPackageBalance.upsert({
-        where: {
-          user_id_package_id: {
-            user_id: userId,
-            package_id: pkg.id,
-          },
-        },
-        update: {
-          coins_purchased: { increment: pkg.jumlahKoin },
-          coins_remaining: { increment: pkg.jumlahKoin },
-        },
-        create: {
-          user_id: userId,
-          package_id: pkg.id,
-          coins_purchased: pkg.jumlahKoin,
-          coins_remaining: pkg.jumlahKoin,
-        },
-      });
-
-      const allBalances = await tx.userPackageBalance.findMany({
-        where: { user_id: userId },
-        select: { coins_remaining: true },
-      });
-
-      const totalCoins = allBalances.reduce(
-        (sum, b) => sum + b.coins_remaining,
-        0,
-      );
-
-      const updatedUser = await tx.user.update({
-        where: { id: userId },
-        data: {
-          sisa_credit: totalCoins,
-          active_package_id: pkg.id,
-          status_langganan: true,
-          tipe_akun: "premium",
-        },
-        include: { active_package: true },
-      });
+      const updatedUser = await creditPackagePurchase(tx, userId, pkg);
 
       await tx.transaction.create({
         data: {
@@ -498,44 +460,7 @@ exports.paymentNotification = async (req, res) => {
         const pkg = transaction.package;
         const userId = transaction.user_id;
 
-        await tx.userPackageBalance.upsert({
-          where: {
-            user_id_package_id: {
-              user_id: userId,
-              package_id: pkg.id,
-            },
-          },
-          update: {
-            coins_purchased: { increment: pkg.jumlahKoin },
-            coins_remaining: { increment: pkg.jumlahKoin },
-          },
-          create: {
-            user_id: userId,
-            package_id: pkg.id,
-            coins_purchased: pkg.jumlahKoin,
-            coins_remaining: pkg.jumlahKoin,
-          },
-        });
-
-        const allBalances = await tx.userPackageBalance.findMany({
-          where: { user_id: userId },
-          select: { coins_remaining: true },
-        });
-
-        const totalCoins = allBalances.reduce(
-          (sum, b) => sum + b.coins_remaining,
-          0,
-        );
-
-        await tx.user.update({
-          where: { id: userId },
-          data: {
-            sisa_credit: totalCoins,
-            active_package_id: pkg.id,
-            status_langganan: true,
-            tipe_akun: "premium",
-          },
-        });
+        await creditPackagePurchase(tx, userId, pkg);
       });
 
       console.log(`✅ Payment SUCCESS - Package activated for user ${transaction.user_id}, invoice ${invoiceNumber}`);
@@ -597,47 +522,7 @@ exports.paymentCallback = async (req, res) => {
         const pkg = transaction.package;
         const userId = transaction.user_id;
 
-        await tx.userPackageBalance.upsert({
-          where: {
-            user_id_package_id: {
-              user_id: userId,
-              package_id: pkg.id,
-            },
-          },
-          update: {
-            coins_purchased: { increment: pkg.jumlahKoin },
-            coins_remaining: { increment: pkg.jumlahKoin },
-          },
-          create: {
-            user_id: userId,
-            package_id: pkg.id,
-            coins_purchased: pkg.jumlahKoin,
-            coins_remaining: pkg.jumlahKoin,
-          },
-        });
-
-        const allBalances = await tx.userPackageBalance.findMany({
-          where: { user_id: userId },
-          select: { coins_remaining: true },
-        });
-
-        const totalCoins = allBalances.reduce(
-          (sum, b) => sum + b.coins_remaining,
-          0,
-        );
-
-        const updatedUser = await tx.user.update({
-          where: { id: userId },
-          data: {
-            sisa_credit: totalCoins,
-            active_package_id: pkg.id,
-            status_langganan: true,
-            tipe_akun: "premium",
-          },
-          include: { active_package: true },
-        });
-
-        return updatedUser;
+        return creditPackagePurchase(tx, userId, pkg);
       });
 
       return success(res, {
