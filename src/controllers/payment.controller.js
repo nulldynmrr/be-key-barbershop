@@ -226,7 +226,7 @@ exports.createTransaction = async (req, res) => {
         payment_due_date: 60,
       },
       additional_info: {
-        notification_url: `${backendUrl}/api/v1/payments/notification`,
+        override_notification_url: `${backendUrl}/api/v1/payments/notification`,
       },
     };
 
