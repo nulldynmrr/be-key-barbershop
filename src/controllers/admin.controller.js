@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const bcrypt = require("bcrypt");
 const mailService = require("../services/mail.service");
 const { success, error: sendError } = require("../utils/response.helper");
+const { creditPackagePurchase } = require("../services/package.service");
 
 const createAuditLog = async (adminId, action, target = null, details = null, req = null) => {
   try {
@@ -199,6 +200,60 @@ const deleteUser = async (req, res, next) => {
       return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
     return sendError(res, { message: error.message });
+  }
+};
+
+const topupPackage = async (req, res, next) => {
+  try {
+    const { packageId } = req.body;
+    if (!packageId || typeof packageId !== "string") {
+      const error = new Error("packageId wajib diisi");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const pkg = await prisma.subscriptionPackage.findUnique({
+      where: { id: packageId },
+      include: { llmModel: true, imageModel: true },
+    });
+
+    if (!pkg) {
+      const error = new Error("Paket tidak ditemukan");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (pkg.status !== "AKTIF") {
+      const error = new Error("Paket sedang nonaktif, tidak bisa di-top-up");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!pkg.llmModelId || !pkg.llmModel?.isActive) {
+      const error = new Error("Model AI untuk paket ini sedang nonaktif");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (pkg.featVirtualTryOn && (!pkg.imageModelId || !pkg.imageModel?.isActive)) {
+      const error = new Error("Model Image Gen untuk paket ini sedang nonaktif");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      return creditPackagePurchase(tx, req.params.id, pkg);
+    });
+
+    await createAuditLog(req.user.id, "ADMIN_TOPUP_PACKAGE", req.params.id, { packageId, koin: pkg.jumlahKoin }, req);
+
+    return success(res, {
+      message: "Top-up paket berhasil",
+      data: { sisa_credit: updatedUser.sisa_credit, active_package_id: updatedUser.active_package_id },
+    });
+  } catch (error) {
+    if (error.code === "P2025") {
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
+    }
+    return sendError(res, { statusCode: error.statusCode || 500, message: error.message });
   }
 };
 
@@ -414,6 +469,7 @@ module.exports = {
   adjustCredit,
   updateUserStatus,
   deleteUser,
+  topupPackage,
   updateAdminProfile,
   getAdminProfile,
   getAuditLogs,

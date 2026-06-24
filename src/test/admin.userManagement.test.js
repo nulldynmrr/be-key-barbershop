@@ -116,4 +116,58 @@ describe("Admin: User & Subscription Management", () => {
     });
     expect(log.details.reason).toBe("Kompensasi error sistem");
   });
+
+  it("POST /admin/users/:id/topup-package mengkredit koin dan auto-activate jika belum ada paket aktif", async () => {
+    await prisma.user.update({ where: { id: targetUserId }, data: { active_package_id: null } });
+    await prisma.userPackageBalance.deleteMany({ where: { user_id: targetUserId } });
+
+    const res = await request(app)
+      .post(`/api/v1/admin/users/${targetUserId}/topup-package`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ packageId: idPaketAum });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.active_package_id).toBe(idPaketAum);
+
+    const balance = await prisma.userPackageBalance.findUnique({
+      where: { user_id_package_id: { user_id: targetUserId, package_id: idPaketAum } },
+    });
+    expect(balance.coins_remaining).toBe(100);
+  });
+
+  it("POST /admin/users/:id/topup-package TIDAK mengubah active_package_id jika paket aktif masih ada saldo", async () => {
+    // Arrange: target sudah aktif di idPaketAum dengan saldo > 0 (dari test sebelumnya)
+    await prisma.user.update({ where: { id: targetUserId }, data: { active_package_id: idPaketAum } });
+
+    const res = await request(app)
+      .post(`/api/v1/admin/users/${targetUserId}/topup-package`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ packageId: idPaketAumKedua });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.active_package_id).toBe(idPaketAum); // tidak berubah
+
+    const balanceKedua = await prisma.userPackageBalance.findUnique({
+      where: { user_id_package_id: { user_id: targetUserId, package_id: idPaketAumKedua } },
+    });
+    expect(balanceKedua.coins_remaining).toBe(30); // tetap dikreditkan
+  });
+
+  it("POST /admin/users/:id/topup-package ditolak 400 untuk paket NONAKTIF", async () => {
+    const res = await request(app)
+      .post(`/api/v1/admin/users/${targetUserId}/topup-package`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ packageId: idPaketAumNonaktif });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("POST /admin/users/:id/topup-package ditolak 403 untuk non-admin", async () => {
+    const res = await request(app)
+      .post(`/api/v1/admin/users/${targetUserId}/topup-package`)
+      .set("Authorization", `Bearer ${userToken}`)
+      .send({ packageId: idPaketAum });
+
+    expect(res.statusCode).toBe(403);
+  });
 });
