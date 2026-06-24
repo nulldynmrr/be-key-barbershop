@@ -82,6 +82,7 @@ describe("Admin: User & Subscription Management", () => {
     await prisma.userPackageBalance.deleteMany({ where: { user_id: targetUserId } });
     await prisma.user.update({ where: { id: targetUserId }, data: { active_package_id: null } });
     await prisma.user.delete({ where: { id: targetUserId } });
+    await prisma.auditLog.deleteMany({ where: { admin_id: adminId } });
     await prisma.user.delete({ where: { id: adminId } });
     await prisma.user.deleteMany({ where: { email: "user_aum@test.com" } });
     await prisma.subscriptionPackage.deleteMany({ where: { id: { in: [idPaketAum, idPaketAumKedua, idPaketAumNonaktif] } } });
@@ -99,5 +100,20 @@ describe("Admin: User & Subscription Management", () => {
     expect(res.body.data.package_balances[0].package).toMatchObject({ namaPaket: "AUM Aktif", jumlahKoin: 100 });
     expect(Array.isArray(res.body.data.transactions)).toBe(true);
     expect(res.body.data._count.package_balances).toBe(1);
+  });
+
+  it("PATCH /admin/users/:id/credit menyertakan reason di audit log", async () => {
+    const res = await request(app)
+      .patch(`/api/v1/admin/users/${targetUserId}/credit`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ amount: 10, reason: "Kompensasi error sistem" });
+
+    expect(res.statusCode).toBe(200);
+
+    const log = await prisma.auditLog.findFirst({
+      where: { admin_id: adminId, action: "ADJUST_CREDIT", target: targetUserId },
+      orderBy: { created_at: "desc" },
+    });
+    expect(log.details.reason).toBe("Kompensasi error sistem");
   });
 });

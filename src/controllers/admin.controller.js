@@ -129,7 +129,7 @@ const adjustCredit = async (req, res, next) => {
         "Admin merubah saldo credit user",
       );
 
-    await createAuditLog(req.user.id, "ADJUST_CREDIT", user.id, { delta, new_credit: user.sisa_credit }, req);
+    await createAuditLog(req.user.id, "ADJUST_CREDIT", user.id, { delta, new_credit: user.sisa_credit, reason: req.body.reason }, req);
 
 
     return success(res, {
