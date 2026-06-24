@@ -5,6 +5,8 @@ const {
   adjustCredit,
   updateUserStatus,
   deleteUser,
+  topupPackage,
+  setActivePackage,
   updateAdminProfile,
   getAdminProfile,
   getAuditLogs,
@@ -144,6 +146,65 @@ router.patch("/users/:id/credit", adjustCredit);
  *         description: Status ban user berhasil diupdate
  */
 router.patch("/users/:id/status", updateUserStatus);
+
+/**
+ * @swagger
+ * /v1/admin/users/{id}/topup-package:
+ *   post:
+ *     summary: Kredit koin paket tertentu ke user (simulasi pembelian manual)
+ *     tags: [Admin Management]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [packageId]
+ *             properties:
+ *               packageId: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Top-up berhasil
+ */
+router.post("/users/:id/topup-package", topupPackage);
+
+/**
+ * @swagger
+ * /v1/admin/users/{id}/active-package:
+ *   patch:
+ *     summary: Force-set atau cabut paket aktif user
+ *     tags: [Admin Management]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [packageId]
+ *             properties:
+ *               packageId:
+ *                 type: string
+ *                 nullable: true
+ *                 description: uuid paket, atau null untuk mencabut paket aktif
+ *     responses:
+ *       200:
+ *         description: Paket aktif berhasil diubah/dicabut
+ */
+router.patch("/users/:id/active-package", setActivePackage);
 
 /**
  * @swagger

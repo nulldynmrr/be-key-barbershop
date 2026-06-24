@@ -2,6 +2,7 @@ const prisma = require("../config/prisma");
 const bcrypt = require("bcrypt");
 const mailService = require("../services/mail.service");
 const { success, error: sendError } = require("../utils/response.helper");
+const { creditPackagePurchase } = require("../services/package.service");
 
 const createAuditLog = async (adminId, action, target = null, details = null, req = null) => {
   try {
@@ -74,6 +75,21 @@ const getUserDetail = async (req, res, next) => {
       include: {
         ai_generations: { orderBy: { tgl_generate: "desc" }, take: 10 },
         system_api_logs: { orderBy: { tgl_penggunaan: "desc" }, take: 10 },
+        active_package: { select: { id: true, namaPaket: true } },
+        package_balances: {
+          include: { package: { select: { namaPaket: true, jumlahKoin: true } } },
+          orderBy: { purchased_at: "desc" },
+        },
+        transactions: { orderBy: { tgl_transaksi: "desc" }, take: 10 },
+        _count: {
+          select: {
+            transactions: true,
+            ai_generations: true,
+            system_api_logs: true,
+            feedbacks: true,
+            package_balances: true,
+          },
+        },
       },
     });
 
@@ -114,7 +130,7 @@ const adjustCredit = async (req, res, next) => {
         "Admin merubah saldo credit user",
       );
 
-    await createAuditLog(req.user.id, "ADJUST_CREDIT", user.id, { delta, new_credit: user.sisa_credit }, req);
+    await createAuditLog(req.user.id, "ADJUST_CREDIT", user.id, { delta, new_credit: user.sisa_credit, reason: req.body.reason }, req);
 
 
     return success(res, {
@@ -184,6 +200,110 @@ const deleteUser = async (req, res, next) => {
       return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
     }
     return sendError(res, { message: error.message });
+  }
+};
+
+const topupPackage = async (req, res, next) => {
+  try {
+    const { packageId } = req.body;
+    if (!packageId || typeof packageId !== "string") {
+      const error = new Error("packageId wajib diisi");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const pkg = await prisma.subscriptionPackage.findUnique({
+      where: { id: packageId },
+      include: { llmModel: true, imageModel: true },
+    });
+
+    if (!pkg) {
+      const error = new Error("Paket tidak ditemukan");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (pkg.status !== "AKTIF") {
+      const error = new Error("Paket sedang nonaktif, tidak bisa di-top-up");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!pkg.llmModelId || !pkg.llmModel?.isActive) {
+      const error = new Error("Model AI untuk paket ini sedang nonaktif");
+      error.statusCode = 400;
+      throw error;
+    }
+    if (pkg.featVirtualTryOn && (!pkg.imageModelId || !pkg.imageModel?.isActive)) {
+      const error = new Error("Model Image Gen untuk paket ini sedang nonaktif");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      return creditPackagePurchase(tx, req.params.id, pkg);
+    });
+
+    await createAuditLog(req.user.id, "ADMIN_TOPUP_PACKAGE", req.params.id, { packageId, koin: pkg.jumlahKoin }, req);
+
+    return success(res, {
+      message: "Top-up paket berhasil",
+      data: { sisa_credit: updatedUser.sisa_credit, active_package_id: updatedUser.active_package_id },
+    });
+  } catch (error) {
+    if (error.code === "P2025") {
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
+    }
+    return sendError(res, { statusCode: error.statusCode || 500, message: error.message });
+  }
+};
+
+const setActivePackage = async (req, res, next) => {
+  try {
+    const { packageId } = req.body;
+    if (packageId !== null && typeof packageId !== "string") {
+      const error = new Error("packageId harus berupa string atau null");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (packageId === null) {
+      const user = await prisma.user.update({
+        where: { id: req.params.id },
+        data: { active_package_id: null, status_langganan: false, tipe_akun: "free" },
+      });
+      await createAuditLog(req.user.id, "ADMIN_REVOKE_ACTIVE_PACKAGE", user.id, {}, req);
+      return success(res, {
+        message: "Paket aktif berhasil dicabut",
+        data: { id: user.id, active_package_id: user.active_package_id },
+      });
+    }
+
+    const balance = await prisma.userPackageBalance.findUnique({
+      where: { user_id_package_id: { user_id: req.params.id, package_id: packageId } },
+    });
+
+    if (!balance) {
+      const error = new Error("User tidak punya saldo untuk paket ini");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { active_package_id: packageId, status_langganan: true, tipe_akun: "premium" },
+    });
+
+    await createAuditLog(req.user.id, "ADMIN_SET_ACTIVE_PACKAGE", user.id, { packageId }, req);
+
+    return success(res, {
+      message: "Paket aktif berhasil diubah",
+      data: { id: user.id, active_package_id: user.active_package_id },
+    });
+  } catch (error) {
+    if (error.code === "P2025") {
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
+    }
+    return sendError(res, { statusCode: error.statusCode || 500, message: error.message });
   }
 };
 
@@ -399,6 +519,8 @@ module.exports = {
   adjustCredit,
   updateUserStatus,
   deleteUser,
+  topupPackage,
+  setActivePackage,
   updateAdminProfile,
   getAdminProfile,
   getAuditLogs,
