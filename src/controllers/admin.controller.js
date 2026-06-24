@@ -74,6 +74,21 @@ const getUserDetail = async (req, res, next) => {
       include: {
         ai_generations: { orderBy: { tgl_generate: "desc" }, take: 10 },
         system_api_logs: { orderBy: { tgl_penggunaan: "desc" }, take: 10 },
+        active_package: { select: { id: true, namaPaket: true } },
+        package_balances: {
+          include: { package: { select: { namaPaket: true, jumlahKoin: true } } },
+          orderBy: { purchased_at: "desc" },
+        },
+        transactions: { orderBy: { tgl_transaksi: "desc" }, take: 10 },
+        _count: {
+          select: {
+            transactions: true,
+            ai_generations: true,
+            system_api_logs: true,
+            feedbacks: true,
+            package_balances: true,
+          },
+        },
       },
     });
 
