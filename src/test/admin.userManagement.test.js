@@ -170,4 +170,53 @@ describe("Admin: User & Subscription Management", () => {
 
     expect(res.statusCode).toBe(403);
   });
+
+  it("PATCH /admin/users/:id/active-package mengubah active_package_id kalau user punya balance paket itu", async () => {
+    await prisma.user.update({ where: { id: targetUserId }, data: { active_package_id: null } });
+    await prisma.userPackageBalance.upsert({
+      where: { user_id_package_id: { user_id: targetUserId, package_id: idPaketAum } },
+      update: { coins_remaining: 50 },
+      create: { user_id: targetUserId, package_id: idPaketAum, coins_purchased: 50, coins_remaining: 50 },
+    });
+
+    const res = await request(app)
+      .patch(`/api/v1/admin/users/${targetUserId}/active-package`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ packageId: idPaketAum });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.active_package_id).toBe(idPaketAum);
+  });
+
+  it("PATCH /admin/users/:id/active-package ditolak 400 kalau user tidak punya balance paket itu", async () => {
+    const res = await request(app)
+      .patch(`/api/v1/admin/users/${targetUserId}/active-package`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ packageId: idPaketAumNonaktif });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("PATCH /admin/users/:id/active-package dengan packageId null mencabut paket aktif", async () => {
+    const res = await request(app)
+      .patch(`/api/v1/admin/users/${targetUserId}/active-package`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ packageId: null });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.active_package_id).toBeNull();
+
+    const user = await prisma.user.findUnique({ where: { id: targetUserId } });
+    expect(user.status_langganan).toBe(false);
+    expect(user.tipe_akun).toBe("free");
+  });
+
+  it("PATCH /admin/users/:id/active-package ditolak 403 untuk non-admin", async () => {
+    const res = await request(app)
+      .patch(`/api/v1/admin/users/${targetUserId}/active-package`)
+      .set("Authorization", `Bearer ${userToken}`)
+      .send({ packageId: idPaketAum });
+
+    expect(res.statusCode).toBe(403);
+  });
 });

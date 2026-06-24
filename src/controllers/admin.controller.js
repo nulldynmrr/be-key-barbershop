@@ -257,6 +257,56 @@ const topupPackage = async (req, res, next) => {
   }
 };
 
+const setActivePackage = async (req, res, next) => {
+  try {
+    const { packageId } = req.body;
+    if (packageId !== null && typeof packageId !== "string") {
+      const error = new Error("packageId harus berupa string atau null");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (packageId === null) {
+      const user = await prisma.user.update({
+        where: { id: req.params.id },
+        data: { active_package_id: null, status_langganan: false, tipe_akun: "free" },
+      });
+      await createAuditLog(req.user.id, "ADMIN_REVOKE_ACTIVE_PACKAGE", user.id, {}, req);
+      return success(res, {
+        message: "Paket aktif berhasil dicabut",
+        data: { id: user.id, active_package_id: user.active_package_id },
+      });
+    }
+
+    const balance = await prisma.userPackageBalance.findUnique({
+      where: { user_id_package_id: { user_id: req.params.id, package_id: packageId } },
+    });
+
+    if (!balance) {
+      const error = new Error("User tidak punya saldo untuk paket ini");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: { active_package_id: packageId },
+    });
+
+    await createAuditLog(req.user.id, "ADMIN_SET_ACTIVE_PACKAGE", user.id, { packageId }, req);
+
+    return success(res, {
+      message: "Paket aktif berhasil diubah",
+      data: { id: user.id, active_package_id: user.active_package_id },
+    });
+  } catch (error) {
+    if (error.code === "P2025") {
+      return sendError(res, { statusCode: 404, message: "User tidak ditemukan" });
+    }
+    return sendError(res, { statusCode: error.statusCode || 500, message: error.message });
+  }
+};
+
 const requestAdminOTP = async (req, res, next) => {
   try {
     const admin = await prisma.user.findUnique({
@@ -470,6 +520,7 @@ module.exports = {
   updateUserStatus,
   deleteUser,
   topupPackage,
+  setActivePackage,
   updateAdminProfile,
   getAdminProfile,
   getAuditLogs,
