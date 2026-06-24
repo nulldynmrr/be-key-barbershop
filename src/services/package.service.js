@@ -296,7 +296,7 @@ const getAllPackages = async (page = 1, limit = 10) => {
       else                                   durasi_display = `${pkg.durationDays} Hari`;
     }
 
-    let isPackageActive = true;
+    let isPackageActive = pkg.status === "AKTIF";
 
     // Cek model LLM
     if (!pkg.llmModelId || !modelStatusMap[pkg.llmModelId]) {
