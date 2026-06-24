@@ -172,7 +172,10 @@ describe("Admin: User & Subscription Management", () => {
   });
 
   it("PATCH /admin/users/:id/active-package mengubah active_package_id kalau user punya balance paket itu", async () => {
-    await prisma.user.update({ where: { id: targetUserId }, data: { active_package_id: null } });
+    await prisma.user.update({
+      where: { id: targetUserId },
+      data: { active_package_id: null, status_langganan: false, tipe_akun: "free" },
+    });
     await prisma.userPackageBalance.upsert({
       where: { user_id_package_id: { user_id: targetUserId, package_id: idPaketAum } },
       update: { coins_remaining: 50 },
@@ -186,6 +189,10 @@ describe("Admin: User & Subscription Management", () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.data.active_package_id).toBe(idPaketAum);
+
+    const updatedUser = await prisma.user.findUnique({ where: { id: targetUserId } });
+    expect(updatedUser.status_langganan).toBe(true);
+    expect(updatedUser.tipe_akun).toBe("premium");
   });
 
   it("PATCH /admin/users/:id/active-package ditolak 400 kalau user tidak punya balance paket itu", async () => {

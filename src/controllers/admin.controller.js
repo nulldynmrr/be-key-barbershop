@@ -290,7 +290,7 @@ const setActivePackage = async (req, res, next) => {
 
     const user = await prisma.user.update({
       where: { id: req.params.id },
-      data: { active_package_id: packageId },
+      data: { active_package_id: packageId, status_langganan: true, tipe_akun: "premium" },
     });
 
     await createAuditLog(req.user.id, "ADMIN_SET_ACTIVE_PACKAGE", user.id, { packageId }, req);
